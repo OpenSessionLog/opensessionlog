@@ -1,0 +1,2 @@
+{"uuid":"evt-001","type":"user","timestamp":"2026-06-20T13:00:00Z","sessionId":"sess-think","version":"1.0","cwd":"/tmp","message":{"content":"Plan a migration."}}
+{"uuid":"evt-002","type":"assistant","timestamp":"2026-06-20T13:00:01Z","sessionId":"sess-think","version":"1.0","cwd":"/tmp","message":{"model":"claude-sonnet-4","content":[{"type":"thinking","thinking":"First, audit existing tables."},{"type":"text","text":"Here is a plan."}],"usage":{"output_tokens":20}}}

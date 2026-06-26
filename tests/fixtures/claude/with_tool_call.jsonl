@@ -1,0 +1,3 @@
+{"uuid":"evt-001","type":"user","timestamp":"2026-06-20T11:00:00Z","sessionId":"sess-tool","version":"1.0","cwd":"/tmp","message":{"content":"List files."}}
+{"uuid":"evt-002","type":"assistant","timestamp":"2026-06-20T11:00:01Z","sessionId":"sess-tool","version":"1.0","cwd":"/tmp","message":{"model":"claude-sonnet-4","content":[{"type":"text","text":"I'll list the files."},{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"ls -la"}}],"usage":{"output_tokens":10}}}
+{"uuid":"evt-003","type":"user","timestamp":"2026-06-20T11:00:02Z","sessionId":"sess-tool","version":"1.0","cwd":"/tmp","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"mock output"}]}}

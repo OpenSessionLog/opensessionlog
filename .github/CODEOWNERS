@@ -1,0 +1,4 @@
+# Code owners — each line is a file pattern followed by one or more owners.
+# PRs affecting matched files require approval from at least one listed owner.
+
+* @jinx-g

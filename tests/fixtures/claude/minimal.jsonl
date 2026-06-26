@@ -1,0 +1,2 @@
+{"uuid":"evt-001","type":"user","timestamp":"2026-06-20T10:00:00Z","sessionId":"sess-minimal","version":"1.0","cwd":"/tmp","message":{"content":"Hello, Claude.","usage":{"input_tokens":12}}}
+{"uuid":"evt-002","type":"assistant","timestamp":"2026-06-20T10:00:01Z","sessionId":"sess-minimal","version":"1.0","cwd":"/tmp","message":{"model":"claude-sonnet-4","content":"Hello! How can I help?","usage":{"output_tokens":5}}}
