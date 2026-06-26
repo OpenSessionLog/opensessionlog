@@ -93,3 +93,19 @@ pub struct GrepHit {
     pub content_snippet: String,
     pub rank: f64,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticHit {
+    pub session_id: Uuid,
+    pub message_uuid: Uuid,
+    pub role: String,
+    pub content_snippet: String,
+    pub distance: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimilarSession {
+    pub session_id: Uuid,
+    pub title: Option<String>,
+    pub distance: f64,
+}

@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use uuid::Uuid;
 
 use crate::db;
-use crate::error::Result;
+use crate::embed;
+use crate::error::{OslError, Result};
 use crate::export;
 use crate::ingest;
 use crate::search;
+use crate::watch;
 
 #[derive(Parser)]
 #[command(
@@ -56,6 +59,45 @@ pub enum Cmd {
         /// Output format.
         #[arg(long, default_value = "markdown")]
         format: String,
+    },
+    /// Compute and store message embeddings via a user-supplied embedder script.
+    Embed {
+        /// Path to the embedder script (invoked once; NDJSON over stdin/stdout).
+        #[arg(long)]
+        provider: PathBuf,
+        /// Embed at most N messages with NULL embeddings (default: all).
+        #[arg(long)]
+        limit: Option<u64>,
+    },
+    /// Semantic KNN search over stored embeddings.
+    Search {
+        /// Natural-language query to embed and match.
+        query: String,
+        /// Maximum number of results.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
+    /// Find sessions similar to a given session by summary embedding.
+    Similar {
+        /// Session ID (UUID) to compare against.
+        session_id: String,
+        /// Maximum number of similar sessions to return.
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+    },
+    /// Watch directories and auto-ingest changed session files.
+    Watch {
+        /// Directories/files to watch (default: ~/.claude/projects/).
+        paths: Vec<PathBuf>,
+        /// Debounce window in milliseconds before flushing an ingest batch.
+        #[arg(long, default_value_t = 1500)]
+        debounce: u64,
+        /// Poll interval (seconds) for SQLite databases (inotify-unfriendly).
+        #[arg(long, default_value_t = 60)]
+        interval: u64,
+        /// Scan once and exit (do not run as a daemon). Useful for tests/cron.
+        #[arg(long)]
+        once: bool,
     },
 }
 
@@ -113,6 +155,63 @@ pub fn run(cli: Cli) -> Result<()> {
                         "unsupported export format: {other}"
                     )));
                 }
+            }
+        }
+        Cmd::Embed { provider, limit } => {
+            let mut conn = db::open(&vault)?;
+            let stats = embed::run(&mut conn, &provider, limit)?;
+            println!(
+                "embedded {} messages across {} sessions summarized (model={}, dims={})",
+                stats.messages_embedded, stats.sessions_summarized, stats.model, stats.dimensions
+            );
+        }
+        Cmd::Search { query, limit } => {
+            let conn = db::open(&vault)?;
+            if !search::has_embeddings(&conn)? {
+                println!("no embeddings found; run 'osl embed' first");
+            } else {
+                let hits = search::semantic(&conn, &query, limit)?;
+                for hit in hits {
+                    println!(
+                        "[{}] {}: {} (dist {})",
+                        hit.session_id, hit.role, hit.content_snippet, hit.distance
+                    );
+                }
+            }
+        }
+        Cmd::Similar { session_id, limit } => {
+            let conn = db::open(&vault)?;
+            let id = Uuid::parse_str(&session_id).map_err(OslError::from)?;
+            if !search::has_summary_embedding(&conn, &id)? {
+                println!("session {session_id} has no summary embedding; run 'osl embed' first");
+                return Ok(());
+            }
+            let hits = search::similar(&conn, &id, limit)?;
+            for hit in hits {
+                println!(
+                    "[{}] {} (dist {})",
+                    hit.session_id,
+                    hit.title.unwrap_or_default(),
+                    hit.distance
+                );
+            }
+        }
+        Cmd::Watch {
+            paths,
+            debounce,
+            interval,
+            once,
+        } => {
+            let mut paths = paths;
+            if paths.is_empty() {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                paths.push(PathBuf::from(home).join(".claude/projects"));
+            }
+            let mut conn = db::open(&vault)?;
+            if once {
+                watch::scan_once(&mut conn, &paths, interval, false)?;
+            } else {
+                watch::watch(&mut conn, &paths, debounce, interval)?;
             }
         }
     }

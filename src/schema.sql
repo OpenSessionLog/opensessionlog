@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     raw_path            TEXT,
     parent_session_id   TEXT    REFERENCES sessions(id),
     error_count         INTEGER NOT NULL DEFAULT 0,
+    summary_embedding   BLOB,
     is_archived         INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))

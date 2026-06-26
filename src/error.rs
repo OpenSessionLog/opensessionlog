@@ -17,6 +17,9 @@ pub enum OslError {
     #[error("connector error: {0}")]
     Connector(String),
 
+    #[error("embed error: {0}")]
+    Embed(String),
+
     #[error("not found: {0}")]
     NotFound(String),
 

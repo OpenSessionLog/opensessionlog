@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod connector;
 pub mod db;
+pub mod embed;
 pub mod error;
 pub mod export;
 pub mod ids;
@@ -8,3 +9,5 @@ pub mod ingest;
 pub mod model;
 pub mod project;
 pub mod search;
+pub mod vec;
+pub mod watch;
