@@ -47,6 +47,20 @@ pub fn open(path: &Path) -> Result<Connection> {
         [],
     );
 
+    // Migration: add the 'codex' and 'copilot' sources to existing vaults.
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO sources(name,is_active)
+         SELECT 'codex', 1
+         WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='sources')",
+        [],
+    );
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO sources(name,is_active)
+         SELECT 'copilot', 1
+         WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='sources')",
+        [],
+    );
+
     // Phase 2 migration: add sessions.summary_embedding to pre-existing vaults.
     let sessions_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')",

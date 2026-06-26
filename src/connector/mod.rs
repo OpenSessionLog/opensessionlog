@@ -8,6 +8,9 @@ use crate::model::{NormalizedSession, SessionRef};
 pub mod claude;
 pub use claude::ClaudeCodeConnector;
 
+pub mod codex;
+pub use codex::CodexCliConnector;
+
 pub mod opencode;
 pub use opencode::OpenCodeConnector;
 
@@ -26,6 +29,7 @@ pub trait Connector {
 pub fn for_source(name: &str) -> Option<Box<dyn Connector>> {
     match name {
         "claude" => Some(Box::new(ClaudeCodeConnector)),
+        "codex" => Some(Box::new(CodexCliConnector)),
         "opencode" => Some(Box::new(OpenCodeConnector)),
         "hermes" => Some(Box::new(HermesConnector)),
         _ => None,

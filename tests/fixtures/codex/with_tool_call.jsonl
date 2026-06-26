@@ -1,0 +1,7 @@
+{"timestamp":"2026-06-01T09:15:22Z","type":"session_meta","payload":{"id":"codex-tool","source":"cli","cwd":"/tmp","model_provider":"openai","cli_version":"0.141.0","git":{"sha":"abc123","branch":"main"}}}
+{"timestamp":"2026-06-01T09:15:23Z","type":"turn_context","payload":{"model":"o3"}}
+{"timestamp":"2026-06-01T09:15:24Z","type":"event_msg","payload":{"type":"user_message","message":"Run ls"}}
+{"timestamp":"2026-06-01T09:15:25Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll run ls for you."}]}}
+{"timestamp":"2026-06-01T09:15:26Z","type":"response_item","payload":{"type":"function_call","call_id":"call_abc","name":"exec_command","arguments":"{\"command\":\"ls -la\"}"}}
+{"timestamp":"2026-06-01T09:15:27Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_abc","output":"mock output"}}
+{"timestamp":"2026-06-01T09:15:28Z","type":"event_msg","payload":{"type":"token_count","input":50,"output":30,"cached_input":10}}
