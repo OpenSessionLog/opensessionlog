@@ -1,0 +1,4 @@
+{"uuid":"evt-001","type":"user","timestamp":"2026-06-20T16:00:00Z","sessionId":"sess-unknown","version":"1.0","cwd":"/tmp","message":{"content":"Do something."}}
+{"uuid":"evt-002","type":"assistant","timestamp":"2026-06-20T16:00:01Z","sessionId":"sess-unknown","version":"1.0","cwd":"/tmp","message":{"model":"claude-sonnet-4","content":"Okay.","usage":{"output_tokens":4}}}
+{"uuid":"evt-003","type":"weird-kind","timestamp":"2026-06-20T16:00:02Z","sessionId":"sess-unknown","version":"1.0","cwd":"/tmp","message":{"content":"ignored"}}
+{"uuid":"evt-004","type":"another-unknown","timestamp":"2026-06-20T16:00:03Z","sessionId":"sess-unknown","version":"1.0","cwd":"/tmp","message":{"content":"ignored"}}

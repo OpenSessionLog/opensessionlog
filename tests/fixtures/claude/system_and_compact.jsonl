@@ -1,0 +1,4 @@
+{"uuid":"evt-001","type":"system","timestamp":"2026-06-20T15:00:00Z","sessionId":"sess-system","version":"1.0","cwd":"/tmp","message":{"content":"System prompt"}}
+{"uuid":"evt-002","type":"custom-title","timestamp":"2026-06-20T15:00:01Z","sessionId":"sess-system","version":"1.0","cwd":"/tmp","message":{"content":"Compact session"}}
+{"uuid":"evt-003","type":"user","timestamp":"2026-06-20T15:00:02Z","sessionId":"sess-system","version":"1.0","cwd":"/tmp","message":{"content":"Hi."}}
+{"uuid":"evt-004","type":"assistant","timestamp":"2026-06-20T15:00:03Z","sessionId":"sess-system","version":"1.0","cwd":"/tmp","message":{"model":"claude-sonnet-4","content":"Hi!","usage":{"output_tokens":3}}}
