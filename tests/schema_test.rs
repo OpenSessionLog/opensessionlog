@@ -100,7 +100,16 @@ fn seed_data_present() {
     let source_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM sources", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(source_count, 4);
+    assert_eq!(source_count, 5);
+
+    let sources: Vec<String> = conn
+        .prepare("SELECT name FROM sources ORDER BY name")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(sources.contains(&"hermes".to_string()));
 }
 
 #[test]

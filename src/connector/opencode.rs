@@ -96,7 +96,7 @@ fn ms_to_iso(ms: i64) -> String {
 
 /// Build an ISO 8601 date-time string from Unix seconds (UTC).
 /// Avoids pulling in chrono — we only need this one formatting operation.
-fn chrono_from_unix(secs: i64) -> String {
+pub(crate) fn chrono_from_unix(secs: i64) -> String {
     // Days from Unix epoch (1970-01-01) using civil date arithmetic.
     let mut remaining = secs;
 
