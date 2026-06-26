@@ -6,9 +6,23 @@ use crate::error::{OslError, Result};
 
 pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 
+fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
+    let mut stmt = conn.prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let mut rows = stmt.query([table])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(0)?;
+        if name == col {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Open a SQLite connection with the runtime pragmas required by OpenSessionLog.
 /// WAL mode, foreign keys, and normal synchronous mode are set on every connection.
 pub fn open(path: &Path) -> Result<Connection> {
+    crate::vec::init();
+
     let conn = Connection::open(path)?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
@@ -24,6 +38,16 @@ pub fn open(path: &Path) -> Result<Connection> {
          WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='sources')",
         [],
     );
+
+    // Phase 2 migration: add sessions.summary_embedding to pre-existing vaults.
+    let sessions_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')",
+        [],
+        |r| r.get(0),
+    )?;
+    if sessions_exists && !column_exists(&conn, "sessions", "summary_embedding")? {
+        conn.execute("ALTER TABLE sessions ADD COLUMN summary_embedding BLOB", [])?;
+    }
 
     Ok(conn)
 }
@@ -48,6 +72,7 @@ pub fn init(path: &Path, force: bool) -> Result<PathBuf> {
          ('embedding_model',NULL,'User-supplied embedder model name (set in Phase 2)'),
          ('embedding_dimensions',NULL,'Embedding vector dimension (set in Phase 2)'),
          ('embedding_endpoint',NULL,'Remote embedding endpoint if any (set in Phase 2)'),
+         ('embedder_path',NULL,'Absolute path to the user-supplied embedder script (set by osl embed)'),
          ('default_distance_metric','cosine','sqlite-vec distance metric for semantic search');
          INSERT OR IGNORE INTO sources(name,is_active) VALUES
          ('claude',1),('codex',1),('copilot',1),('opencode',1);",
@@ -87,5 +112,66 @@ mod tests {
             )
             .unwrap();
         assert!(count >= 9);
+    }
+
+    #[test]
+    fn open_migrates_existing_vault_adds_summary_embedding() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path();
+        init(path, true).unwrap();
+
+        open(path).unwrap();
+        let conn = open(path).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='summary_embedding'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(count >= 1);
+
+        // Idempotent: second open must not error.
+        open(path).unwrap();
+    }
+
+    #[test]
+    fn open_migrates_old_schema_vault_re_adds_summary_embedding() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path();
+        init(path, true).unwrap();
+
+        let conn = open(path).unwrap();
+        conn.execute("ALTER TABLE sessions DROP COLUMN summary_embedding", [])
+            .unwrap();
+        assert!(!column_exists(&conn, "sessions", "summary_embedding").unwrap());
+
+        open(path).unwrap();
+        let conn = open(path).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='summary_embedding'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(count >= 1);
+    }
+
+    #[test]
+    fn init_succeeds_on_fresh_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("data.sqlite");
+        init(&path, false).unwrap();
+
+        let conn = open(&path).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='summary_embedding'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(count >= 1);
     }
 }
