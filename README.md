@@ -18,6 +18,9 @@ osl ingest ~/.claude/projects/
 # Ingest a single session file
 osl ingest ~/.claude/projects/my-project/session.jsonl
 
+# Ingest Hermes Agent session database (auto-detected by schema)
+osl ingest ~/.hermes/state.db
+
 # Full-text search with FTS5 syntax
 osl grep "kafka migration"
 osl grep "kafka AND migration" --limit 10
@@ -90,9 +93,10 @@ The full protocol spec and guidance for writing custom providers is in [`example
 ### Data sources
 
 | Source | Format | Connector |
-|---|---|---|
+|---|---|---|---|
 | Claude Code | `.jsonl` event streams | `src/connector/claude.rs` |
 | OpenCode | `.db` SQLite database | `src/connector/opencode.rs` |
+| Hermes Agent | `.db` SQLite database (`state.db`) | `src/connector/hermes.rs` |
 | Codex CLI | Planned | — |
 | GitHub Copilot | Planned | — |
 
