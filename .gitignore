@@ -1,0 +1,22 @@
+# Rust build artifacts
+/target
+
+# SQLite databases and WAL files
+*.sqlite
+*.sqlite-*
+
+# Local environment
+.env
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Cargo.lock is intentionally NOT ignored for this binary crate
+# because we want reproducible CI builds.
