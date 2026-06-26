@@ -8,11 +8,31 @@ use crate::error::{OslError, Result};
 use crate::model::{IngestReport, IngestReportSession, NormalizedSession, SessionRef};
 use crate::project;
 
+/// Detect whether a file path points to a SQLite database based on its extension.
+fn is_db_file(path: &Path) -> bool {
+    path.extension()
+        .map(|ext| ext == "db" || ext == "sqlite")
+        .unwrap_or(false)
+}
+
 /// Ingest a file or directory into the vault.
-/// For Phase 1, the source is always inferred as "claude" for files; directories are discovered
-/// by the connector itself.
+///
+/// Routing rules:
+/// - `.db` / `.sqlite` files     → OpenCode connector (SQLite database)
+/// - `.jsonl` files               → Claude Code connector (JSONL session file)
+/// - Directories                  → Claude Code connector (scans for .jsonl files)
+/// - Other files                  → Claude Code connector (single JSONL session)
+///
+/// Directories are always routed to the claude connector. For opencode databases,
+/// pass the `.db` file path directly.
 pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
-    let refs: Vec<SessionRef> = if path.is_file() {
+    let refs: Vec<SessionRef> = if path.is_file() && is_db_file(path) {
+        // SQLite database — use the opencode connector's discovery to list all sessions.
+        let connector = for_source("opencode")
+            .ok_or_else(|| OslError::Connector("no connector for 'opencode'".to_string()))?;
+        connector.discover(path)?
+    } else if path.is_file() {
+        // Single session file — currently always claude JSONL.
         let native_id = peek_session_id(path)?;
         vec![SessionRef {
             source: "claude".to_string(),
@@ -21,6 +41,7 @@ pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
             project_path: path.parent().map(Path::to_path_buf),
         }]
     } else {
+        // Directory — use claude connector for discovery.
         let connector = for_source("claude")
             .ok_or_else(|| OslError::Connector("no connector for 'claude'".to_string()))?;
         connector.discover(path)?

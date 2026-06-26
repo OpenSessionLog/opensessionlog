@@ -15,8 +15,11 @@ pub fn message_id(session_id: Uuid, event_uuid: &str) -> Uuid {
     )
 }
 
-pub fn tool_call_id(session_id: Uuid, call_id: &str) -> Uuid {
-    Uuid::new_v5(&NAMESPACE_OSL, format!("{session_id}:{call_id}").as_bytes())
+pub fn tool_call_id(session_id: Uuid, message_id: Uuid, call_id: &str) -> Uuid {
+    Uuid::new_v5(
+        &NAMESPACE_OSL,
+        format!("{session_id}:{message_id}:{call_id}").as_bytes(),
+    )
 }
 
 #[cfg(test)]

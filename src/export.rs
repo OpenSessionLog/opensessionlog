@@ -7,6 +7,7 @@ struct SessionHeader {
     title: Option<String>,
     started_at: Option<String>,
     ended_at: Option<String>,
+    source_name: String,
     model: Option<String>,
     input_tokens: i64,
     output_tokens: i64,
@@ -24,10 +25,11 @@ pub fn export_markdown(conn: &Connection, session_id: &str) -> Result<String> {
 
     let header = conn
         .query_row(
-            "SELECT s.title, s.started_at, s.ended_at, s.model,
-                s.input_tokens, s.output_tokens, s.cache_read_tokens, s.cache_write_tokens,
-                s.tool_call_count, p.slug
+            "SELECT s.title, s.started_at, s.ended_at, src.name,
+                s.model, s.input_tokens, s.output_tokens, s.cache_read_tokens,
+                s.cache_write_tokens, s.tool_call_count, p.slug
          FROM sessions s
+         JOIN sources src ON src.id = s.source_id
          LEFT JOIN projects p ON p.id = s.project_id
          WHERE s.id = ?1",
             [sid.to_string()],
@@ -36,13 +38,14 @@ pub fn export_markdown(conn: &Connection, session_id: &str) -> Result<String> {
                     title: r.get(0)?,
                     started_at: r.get(1)?,
                     ended_at: r.get(2)?,
-                    model: r.get(3)?,
-                    input_tokens: r.get(4)?,
-                    output_tokens: r.get(5)?,
-                    cache_read: r.get(6)?,
-                    cache_write: r.get(7)?,
-                    tool_call_count: r.get(8)?,
-                    project_slug: r.get(9)?,
+                    source_name: r.get(3)?,
+                    model: r.get(4)?,
+                    input_tokens: r.get(5)?,
+                    output_tokens: r.get(6)?,
+                    cache_read: r.get(7)?,
+                    cache_write: r.get(8)?,
+                    tool_call_count: r.get(9)?,
+                    project_slug: r.get(10)?,
                 })
             },
         )
@@ -54,7 +57,7 @@ pub fn export_markdown(conn: &Connection, session_id: &str) -> Result<String> {
         header.title.as_deref().unwrap_or("Untitled session")
     ));
     md.push_str(&format!("- **Session ID:** {session_id}\n"));
-    md.push_str("- **Source:** claude\n");
+    md.push_str(&format!("- **Source:** {}\n", header.source_name));
     md.push_str(&format!(
         "- **Project:** {}\n",
         header.project_slug.as_deref().unwrap_or("unknown")
