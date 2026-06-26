@@ -39,6 +39,14 @@ pub fn open(path: &Path) -> Result<Connection> {
         [],
     );
 
+    // Migration: add the 'hermes' source to existing vaults.
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO sources(name,is_active)
+         SELECT 'hermes', 1
+         WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='sources')",
+        [],
+    );
+
     // Phase 2 migration: add sessions.summary_embedding to pre-existing vaults.
     let sessions_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')",
@@ -75,7 +83,7 @@ pub fn init(path: &Path, force: bool) -> Result<PathBuf> {
          ('embedder_path',NULL,'Absolute path to the user-supplied embedder script (set by osl embed)'),
          ('default_distance_metric','cosine','sqlite-vec distance metric for semantic search');
          INSERT OR IGNORE INTO sources(name,is_active) VALUES
-         ('claude',1),('codex',1),('copilot',1),('opencode',1);",
+         ('claude',1),('codex',1),('copilot',1),('opencode',1),('hermes',1);",
     )?;
 
     Ok(path.to_path_buf())

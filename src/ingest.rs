@@ -15,21 +15,38 @@ fn is_db_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Detect whether a SQLite database is a Hermes state.db or an OpenCode opencode.db
+/// by checking for the Hermes-specific `compression_locks` table.
+fn detect_sqlite_kind(path: &Path) -> Result<&'static str> {
+    let conn = Connection::open(path)?;
+    let is_hermes: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='compression_locks')",
+        [],
+        |r| r.get(0),
+    )?;
+    if is_hermes {
+        Ok("hermes")
+    } else {
+        Ok("opencode")
+    }
+}
+
 /// Ingest a file or directory into the vault.
 ///
 /// Routing rules:
-/// - `.db` / `.sqlite` files     → OpenCode connector (SQLite database)
+/// - `.db` / `.sqlite` files     → Schema detection: Hermes (compression_locks table) or OpenCode
 /// - `.jsonl` files               → Claude Code connector (JSONL session file)
 /// - Directories                  → Claude Code connector (scans for .jsonl files)
 /// - Other files                  → Claude Code connector (single JSONL session)
 ///
-/// Directories are always routed to the claude connector. For opencode databases,
-/// pass the `.db` file path directly.
+/// Directories are always routed to the claude connector. For SQLite databases,
+/// pass the `.db` file path directly; the connector is chosen by schema detection.
 pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
     let refs: Vec<SessionRef> = if path.is_file() && is_db_file(path) {
-        // SQLite database — use the opencode connector's discovery to list all sessions.
-        let connector = for_source("opencode")
-            .ok_or_else(|| OslError::Connector("no connector for 'opencode'".to_string()))?;
+        // SQLite database — detect Hermes vs OpenCode by schema, then discover.
+        let kind = detect_sqlite_kind(path)?;
+        let connector = for_source(kind)
+            .ok_or_else(|| OslError::Connector(format!("no connector for '{kind}'")))?;
         connector.discover(path)?
     } else if path.is_file() {
         // Single session file — currently always claude JSONL.
@@ -105,6 +122,33 @@ fn write_session(
 
     let sid = session.id.to_string();
 
+    // Guard: if parent_session_id references a session not yet in the vault,
+    // null it out to avoid FK violation (PRAGMA foreign_keys=ON is set).
+    let parent_session_id_str: Option<String> = match session.parent_session_id {
+        Some(parent) => {
+            let pid = parent.to_string();
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
+                [&pid],
+                |r| r.get(0),
+            )?;
+            if exists {
+                Some(pid)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
+    // Null out any child sessions' parent_session_id references before purging
+    // this session, to avoid FK constraint violation (children may reference
+    // this session as their parent).
+    tx.execute(
+        "UPDATE sessions SET parent_session_id = NULL WHERE parent_session_id = ?1",
+        [&sid],
+    )?;
+
     // 1. Purge existing session rows. FTS5 'delete' triggers fire on messages.
     tx.execute("DELETE FROM errata WHERE session_id = ?1", [&sid])?;
     tx.execute("DELETE FROM tool_calls WHERE session_id = ?1", [&sid])?;
@@ -134,7 +178,7 @@ fn write_session(
             session.git_branch.as_deref(),
             session.git_sha.as_deref(),
             session.raw_path.to_string_lossy().to_string(),
-            session.parent_session_id.map(|u| u.to_string()),
+            parent_session_id_str.as_deref(),
             session.error_count,
         ],
     )?;

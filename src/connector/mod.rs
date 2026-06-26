@@ -11,6 +11,9 @@ pub use claude::ClaudeCodeConnector;
 pub mod opencode;
 pub use opencode::OpenCodeConnector;
 
+pub mod hermes;
+pub use hermes::HermesConnector;
+
 pub trait Connector {
     fn name(&self) -> &'static str;
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>>;
@@ -24,6 +27,7 @@ pub fn for_source(name: &str) -> Option<Box<dyn Connector>> {
     match name {
         "claude" => Some(Box::new(ClaudeCodeConnector)),
         "opencode" => Some(Box::new(OpenCodeConnector)),
+        "hermes" => Some(Box::new(HermesConnector)),
         _ => None,
     }
 }
