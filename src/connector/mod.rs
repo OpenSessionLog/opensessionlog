@@ -8,6 +8,9 @@ use crate::model::{NormalizedSession, SessionRef};
 pub mod claude;
 pub use claude::ClaudeCodeConnector;
 
+pub mod opencode;
+pub use opencode::OpenCodeConnector;
+
 pub trait Connector {
     fn name(&self) -> &'static str;
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>>;
@@ -20,6 +23,7 @@ pub trait Connector {
 pub fn for_source(name: &str) -> Option<Box<dyn Connector>> {
     match name {
         "claude" => Some(Box::new(ClaudeCodeConnector)),
+        "opencode" => Some(Box::new(OpenCodeConnector)),
         _ => None,
     }
 }

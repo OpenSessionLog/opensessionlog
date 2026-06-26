@@ -320,7 +320,7 @@ fn parse_file(session_ref: &SessionRef) -> Result<NormalizedSession> {
                                 thinking_parts.push(t.clone())
                             }
                             ClaudeBlock::ToolUse { id, name, input } => {
-                                let tc_uuid = tool_call_id(sid, id);
+                                let tc_uuid = tool_call_id(sid, msg_uuid, id);
                                 let tc = NormalizedToolCall {
                                     uuid: tc_uuid,
                                     call_id: id.clone(),

@@ -13,8 +13,18 @@ pub fn open(path: &Path) -> Result<Connection> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA foreign_keys=ON;
-         PRAGMA synchronous=NORMAL;",
+         PRAGMA synchronous=NORMAL;
+         PRAGMA busy_timeout=5000;",
     )?;
+
+    // Lightweight migration: pre-Issue #5 vaults may be missing the 'opencode' source.
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO sources(name,is_active)
+         SELECT 'opencode', 1
+         WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='sources')",
+        [],
+    );
+
     Ok(conn)
 }
 
