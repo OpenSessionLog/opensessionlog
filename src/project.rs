@@ -83,13 +83,13 @@ pub fn upsert(conn: &Connection, project: &Project) -> Result<i64> {
            git_owner=excluded.git_owner,
            git_repo=excluded.git_repo,
            slug=excluded.slug",
-        [
+        (
             &project.root_path,
-            project.git_remote.as_deref().unwrap_or(""),
-            project.git_owner.as_deref().unwrap_or(""),
-            project.git_repo.as_deref().unwrap_or(""),
+            project.git_remote.as_deref(),
+            project.git_owner.as_deref(),
+            project.git_repo.as_deref(),
             &project.slug,
-        ],
+        ),
     )?;
     let id: i64 = conn.query_row(
         "SELECT id FROM projects WHERE root_path = ?1",

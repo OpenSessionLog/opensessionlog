@@ -1,14 +1,14 @@
 -- OpenSessionLog schema v1 — SQLite + FTS5, WAL mode (pragmas set at runtime)
 -- Embeddings (messages.embedding) are NULL in Phase 1; sqlite-vec lands in Phase 2.
 
-CREATE TABLE vault_config (
+CREATE TABLE IF NOT EXISTS vault_config (
     key         TEXT    NOT NULL PRIMARY KEY,
     value       TEXT,
     description TEXT,
     updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
-CREATE TABLE sources (
+CREATE TABLE IF NOT EXISTS sources (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL UNIQUE,
     version_min TEXT,
@@ -16,7 +16,7 @@ CREATE TABLE sources (
     is_active   INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE projects (
+CREATE TABLE IF NOT EXISTS projects (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     root_path   TEXT    NOT NULL UNIQUE,
     git_remote  TEXT,
@@ -25,10 +25,10 @@ CREATE TABLE projects (
     slug        TEXT,
     created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
-CREATE INDEX idx_projects_slug ON projects(slug);
-CREATE INDEX idx_projects_git ON projects(git_owner, git_repo);
+CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
+CREATE INDEX IF NOT EXISTS idx_projects_git ON projects(git_owner, git_repo);
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id                  TEXT    NOT NULL PRIMARY KEY,
     source_id           INTEGER NOT NULL REFERENCES sources(id),
     project_id          INTEGER REFERENCES projects(id),
@@ -53,14 +53,14 @@ CREATE TABLE sessions (
     created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
-CREATE INDEX idx_sessions_source   ON sessions(source_id);
-CREATE INDEX idx_sessions_project  ON sessions(project_id);
-CREATE INDEX idx_sessions_started  ON sessions(started_at);
-CREATE INDEX idx_sessions_parent   ON sessions(parent_session_id);
-CREATE INDEX idx_sessions_model    ON sessions(model);
-CREATE INDEX idx_sessions_archived ON sessions(is_archived) WHERE is_archived = 0;
+CREATE INDEX IF NOT EXISTS idx_sessions_source   ON sessions(source_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_project  ON sessions(project_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_started  ON sessions(started_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_parent   ON sessions(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_model    ON sessions(model);
+CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(is_archived) WHERE is_archived = 0;
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid            TEXT    NOT NULL UNIQUE,
     session_id      TEXT    NOT NULL REFERENCES sessions(id),
@@ -76,14 +76,14 @@ CREATE TABLE messages (
     embedding       BLOB,
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
-CREATE INDEX idx_messages_session  ON messages(session_id);
-CREATE INDEX idx_messages_role     ON messages(role);
-CREATE INDEX idx_messages_turn     ON messages(session_id, turn_number);
-CREATE INDEX idx_messages_parent   ON messages(parent_uuid);
-CREATE INDEX idx_messages_created  ON messages(created_at);
-CREATE INDEX idx_messages_embedded ON messages(embedding) WHERE embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_session  ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_role     ON messages(role);
+CREATE INDEX IF NOT EXISTS idx_messages_turn     ON messages(session_id, turn_number);
+CREATE INDEX IF NOT EXISTS idx_messages_parent   ON messages(parent_uuid);
+CREATE INDEX IF NOT EXISTS idx_messages_created  ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_embedded ON messages(embedding) WHERE embedding IS NOT NULL;
 
-CREATE TABLE tool_calls (
+CREATE TABLE IF NOT EXISTS tool_calls (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid                TEXT    NOT NULL UNIQUE,
     session_id          TEXT    NOT NULL REFERENCES sessions(id),
@@ -100,31 +100,31 @@ CREATE TABLE tool_calls (
     duration_ms         INTEGER,
     created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
-CREATE INDEX idx_tool_calls_session      ON tool_calls(session_id);
-CREATE INDEX idx_tool_calls_request_msg  ON tool_calls(request_message_id);
-CREATE INDEX idx_tool_calls_response_msg ON tool_calls(response_message_id);
-CREATE INDEX idx_tool_calls_call_id      ON tool_calls(session_id, call_id);
-CREATE INDEX idx_tool_calls_tool         ON tool_calls(tool_name);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_session      ON tool_calls(session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_request_msg  ON tool_calls(request_message_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_response_msg ON tool_calls(response_message_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_call_id      ON tool_calls(session_id, call_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_tool         ON tool_calls(tool_name);
 
-CREATE VIRTUAL TABLE messages_fts USING fts5(
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content,
     role            UNINDEXED,
     content='messages',
     content_rowid='id',
     tokenize='porter unicode61'
 );
-CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
     INSERT INTO messages_fts(rowid, content, role) VALUES (new.id, new.content, new.role);
 END;
-CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content, role) VALUES ('delete', old.id, old.content, old.role);
 END;
-CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content, role) VALUES ('delete', old.id, old.content, old.role);
     INSERT INTO messages_fts(rowid, content, role) VALUES (new.id, new.content, new.role);
 END;
 
-CREATE TABLE reports (
+CREATE TABLE IF NOT EXISTS reports (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     scope               TEXT    NOT NULL,
     period_start        TEXT    NOT NULL,
@@ -136,11 +136,11 @@ CREATE TABLE reports (
     token_budget_used   INTEGER,
     created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
-CREATE INDEX idx_reports_scope    ON reports(scope);
-CREATE INDEX idx_reports_period   ON reports(period_start, period_end);
-CREATE INDEX idx_reports_previous ON reports(previous_report_id);
+CREATE INDEX IF NOT EXISTS idx_reports_scope    ON reports(scope);
+CREATE INDEX IF NOT EXISTS idx_reports_period   ON reports(period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_reports_previous ON reports(previous_report_id);
 
-CREATE TABLE usage_summary (
+CREATE TABLE IF NOT EXISTS usage_summary (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     date                TEXT    NOT NULL,
     source_id           INTEGER NOT NULL REFERENCES sources(id),
@@ -158,11 +158,11 @@ CREATE TABLE usage_summary (
     created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     UNIQUE(date, source_id, project_id)
 );
-CREATE INDEX idx_usage_date    ON usage_summary(date);
-CREATE INDEX idx_usage_source  ON usage_summary(source_id);
-CREATE INDEX idx_usage_project ON usage_summary(project_id);
+CREATE INDEX IF NOT EXISTS idx_usage_date    ON usage_summary(date);
+CREATE INDEX IF NOT EXISTS idx_usage_source  ON usage_summary(source_id);
+CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_summary(project_id);
 
-CREATE TABLE errata (
+CREATE TABLE IF NOT EXISTS errata (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  TEXT    REFERENCES sessions(id),
     message_id  INTEGER REFERENCES messages(id),
@@ -173,6 +173,6 @@ CREATE TABLE errata (
     raw_snippet TEXT,
     created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
-CREATE INDEX idx_errata_session  ON errata(session_id);
-CREATE INDEX idx_errata_source   ON errata(source_id);
-CREATE INDEX idx_errata_type     ON errata(issue_type);
+CREATE INDEX IF NOT EXISTS idx_errata_session  ON errata(session_id);
+CREATE INDEX IF NOT EXISTS idx_errata_source   ON errata(source_id);
+CREATE INDEX IF NOT EXISTS idx_errata_type     ON errata(issue_type);
