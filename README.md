@@ -72,9 +72,20 @@ Options:
 | `osl similar <session-id>` | Find sessions related to a given session by comparing their summary embeddings. |
 | `osl watch [paths..]` | Daemon that monitors directories for new/changed `.jsonl` files (via inotify) and polls `.db`/`.sqlite` files at a configurable interval. Use `--once` for a single scan. |
 
-### Embedder protocol
+### Embedder providers
 
-The `--provider` script is invoked once per `osl embed` run. It receives NDJSON on stdin (one line per message with `id` and `text` fields) and writes NDJSON to stdout: a header line with `type`, `model`, and `dimensions`, followed by one result line per input with `id` and `embedding` (float array). See [`tests/fixtures/embed/identity.py`](tests/fixtures/embed/identity.py) for a reference implementation.
+The `--provider` script is invoked once per `osl embed` run. It receives NDJSON on stdin (one line per message with `id` and `text` fields) and writes NDJSON to stdout: a header line with `type`, `model`, and `dimensions`, followed by one result line per input with `id` and `embedding` (float array).
+
+**Ready-to-use examples** ([`examples/embed-providers/`](examples/embed-providers/)):
+
+| Provider | Description | Requirements |
+|---|---|---|
+| [`openai.sh`](examples/embed-providers/openai.sh) | OpenAI `text-embedding-3-small` via API | `curl`, `jq`, `OPENAI_API_KEY` |
+| [`llamafile.sh`](examples/embed-providers/llamafile.sh) | Local llamafile server embedding endpoint | Running [llamafile](https://github.com/Mozilla-Ocho/llamafile) server |
+| [`sentence-transformers.py`](examples/embed-providers/sentence-transformers.py) | Local Python via sentence-transformers | `sentence-transformers`, `torch` |
+| [`identity.py`](tests/fixtures/embed/identity.py) | Deterministic test fixture (8-dim, hashing) | Python 3 stdlib |
+
+The full protocol spec and guidance for writing custom providers is in [`examples/embed-providers/README.md`](examples/embed-providers/README.md).
 
 ### Data sources
 
