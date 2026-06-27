@@ -4,7 +4,7 @@ OpenSessionLog is a vendor-agnostic SQLite store for AI coding agent sessions.
 
 It ingests session data from tools like Claude Code, Codex CLI, GitHub Copilot, and OpenCode into a single normalized schema, then lets you search across all of them with full-text and semantic search.
 
-> **Phase 2 is complete.** Phase 1 (Claude Code connector + FTS5) shipped first; Phase 2 adds semantic search, embeddings, and a file watcher daemon. See the [build plan](https://github.com/OpenSessionLog/opensessionlog/issues) for upcoming phases.
+> **Phase 3 is complete.** Phase 1 (Claude Code connector + FTS5) shipped first; Phase 2 added semantic search, embeddings, and a file watcher daemon; Phase 3 adds usage aggregation and reporting. See the [build plan](https://github.com/OpenSessionLog/opensessionlog/issues) for upcoming phases.
 
 ## Quickstart
 
@@ -39,6 +39,15 @@ osl export <session-id> --format markdown > session.md
 osl watch ~/.claude/projects/
 # One-shot scan (no daemon):
 osl watch --once ~/.claude/projects/
+
+# Generate a usage report for the last 30 days
+osl report --period last-30-days
+
+# Generate a report for a specific date range in JSON
+osl report --from 2026-06-01 --to 2026-06-15 --format json
+
+# Persist a report (closed periods served from cache on re-run)
+osl report --period monthly --save
 ```
 
 ## CLI
@@ -58,6 +67,7 @@ Commands:
   similar  Find sessions similar to a given session by summary embedding
   watch    Watch directories and auto-ingest changed session files
   export   Export a session transcript
+  report   Aggregate usage into a period report (markdown or JSON)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -74,6 +84,57 @@ Options:
 | `osl search <query>` | Semantic KNN search via `sqlite-vec`. Returns messages ranked by cosine distance to the embedded query. Graceful message when no embeddings exist. |
 | `osl similar <session-id>` | Find sessions related to a given session by comparing their summary embeddings. |
 | `osl watch [paths..]` | Daemon that monitors directories for new/changed `.jsonl` files (via inotify) and polls `.db`/`.sqlite` files at a configurable interval. Use `--once` for a single scan. |
+
+### New in Phase 3
+
+| Command | Description |
+|---|---|
+| `osl report [--period <kind>] [--from <date> --to <date>]` | Aggregate session usage into a period report. Supports named periods (`daily`, `weekly`, `monthly`, `last-30-days`) or custom date ranges. Outputs markdown (default) or JSON. |
+| `osl report --project <slug>` | Filter the report to a single project. |
+| `osl report --source <name>` | Filter the report to a single source (e.g. `claude`, `codex`, `opencode`). |
+| `osl report --save` | Persist the report to the `reports` table. Closed periods (ended before today) are served from cache on subsequent runs; open periods are re-aggregated. |
+
+**Example output:**
+```text
+$ osl report --period weekly
+# Usage Report — global
+
+- **Period:** weekly (2026-06-20 → 2026-06-26)
+- **Generated:** 2026-06-26T21:42:14Z
+- **Source:** fresh
+
+## Totals
+- Sessions: 42
+- Tokens: in=1,500,000 out=800,000 cache_r=600,000 cache_w=200,000 total=3,100,000
+- Estimated cost: no data
+- Messages: 1,200
+- Tool calls: 350
+- Errors: 5
+- Unique models: 2
+- Avg session duration: 1,842s
+
+## Messages by role
+- user: 400
+- assistant: 800
+
+## Top tools
+1. Bash — 200
+2. Edit — 100
+3. Read — 50
+
+## Top projects
+1. opensessionlog — 15 sessions, 500,000 tokens
+
+## Sources
+- claude — 30 sessions, 2,200,000 tokens
+- opencode — 12 sessions, 900,000 tokens
+
+## Daily breakdown
+| date       | sessions | messages | tools | tokens |
+|------------|----------|----------|-------|--------|
+| 2026-06-20 | 8        | 200      | 60    | 500,000 |
+| 2026-06-21 | 5        | 150      | 40    | 400,000 |
+```
 
 ### Embedder providers
 
@@ -97,7 +158,7 @@ The full protocol spec and guidance for writing custom providers is in [`example
 | Claude Code | `.jsonl` event streams | `src/connector/claude.rs` |
 | OpenCode | `.db` SQLite database | `src/connector/opencode.rs` |
 | Hermes Agent | `.db` SQLite database (`state.db`) | `src/connector/hermes.rs` |
-| Codex CLI | Planned | — |
+| Codex CLI | `.jsonl` event streams (auto-detected from Claude format) | `src/connector/codex.rs` |
 | GitHub Copilot | Planned | — |
 
 ## License
