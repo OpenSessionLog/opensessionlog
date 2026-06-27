@@ -9,6 +9,14 @@ It ingests session data from tools like Claude Code, Codex CLI, GitHub Copilot, 
 ## Quickstart
 
 ```bash
+# Guided first-run (recommended for new users)
+osl setup                           # init + discover + ingest all sources, skip embedding
+osl setup --recency 120            # only sessions from the last 120 days
+osl setup --provider ./my-embedder.sh   # also run the embed step
+osl setup --ingest-recency 365 --embed-recency 120 --provider ./my-embedder.sh
+                                     # wide FTS history, narrow embed window (cost control)
+
+# The commands below show the individual steps `setup` automates.
 # Create a vault at ~/.opensessionlog/data.sqlite (or set OSL_VAULT / --vault)
 osl init
 
@@ -68,6 +76,7 @@ Commands:
   watch    Watch directories and auto-ingest changed session files
   export   Export a session transcript
   report   Aggregate usage into a period report (markdown or JSON)
+  setup    Guided first-run: init, discover, ingest, and optionally embed
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -135,6 +144,23 @@ $ osl report --period weekly
 | 2026-06-20 | 8        | 200      | 60    | 500,000 |
 | 2026-06-21 | 5        | 150      | 40    | 400,000 |
 ```
+
+### New in Phase 4
+
+| Command | Description |
+|---|---|
+| `osl setup` | Guided first-run: initialize a vault, discover known source directories, ingest all sessions, and optionally run embeddings. |
+| `osl setup --recency 120` | Ingest and embed only sessions/messages from the last 120 days. |
+| `osl setup --ingest-recency 365 --embed-recency 120 --provider ./embedder.sh` | Ingest a year of history into FTS, but only embed the last 120 days. |
+| `osl setup --force --provider ./embedder.sh` | Re-embed all in-scope messages, even if an embedding already exists. |
+
+`osl setup` discovers sessions from Claude Code (`~/.claude/projects/`), Codex CLI (`~/.codex/sessions/`), OpenCode (`~/.config/opencode/opencode.db`), and Hermes Agent (`~/.hermes/state.db` or XDG equivalents). Pi and GitHub Copilot are planned but not yet supported (Copilot sessions are currently handled inside the Codex connector).
+
+Flag rules:
+- `--recency` and `--since` apply the same window to both ingest and embed.
+- `--ingest-recency` and `--embed-recency` split the windows: if only `--ingest-recency` is set, embed uses the same window; if only `--embed-recency` is set, ingest defaults to **all** (no accidental data loss).
+- The four flag families are mutually exclusive: do not mix `--recency`/`--since` with `--ingest-recency`/`--embed-recency`.
+- When stdin is not a TTY, `osl setup` runs non-interactively (equivalent to `--yes`).
 
 ### Recency-filtered ingestion and embedding (Issue #13)
 

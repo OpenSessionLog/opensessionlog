@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod connector;
 pub mod db;
+pub mod discover;
 pub mod embed;
 pub mod error;
 pub mod export;
@@ -11,5 +12,6 @@ pub mod project;
 pub mod recency;
 pub mod report;
 pub mod search;
+pub mod setup;
 pub mod vec;
 pub mod watch;

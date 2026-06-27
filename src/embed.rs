@@ -31,23 +31,26 @@ pub fn read_config(conn: &Connection) -> Result<Option<EmbedConfig>> {
         .query_row(
             "SELECT value FROM vault_config WHERE key = 'embedding_model'",
             [],
-            |r| r.get(0),
+            |r| r.get::<_, Option<String>>(0),
         )
-        .optional()?;
+        .optional()?
+        .flatten();
     let dims: Option<String> = conn
         .query_row(
             "SELECT value FROM vault_config WHERE key = 'embedding_dimensions'",
             [],
-            |r| r.get(0),
+            |r| r.get::<_, Option<String>>(0),
         )
-        .optional()?;
+        .optional()?
+        .flatten();
     let provider: Option<String> = conn
         .query_row(
             "SELECT value FROM vault_config WHERE key = 'embedder_path'",
             [],
-            |r| r.get(0),
+            |r| r.get::<_, Option<String>>(0),
         )
-        .optional()?;
+        .optional()?
+        .flatten();
 
     match (model, dims, provider) {
         (Some(m), Some(d), Some(p)) => {
