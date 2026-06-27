@@ -58,6 +58,36 @@ pub enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Guided first-run: init → discover → ingest → (optional) embed.
+    Setup {
+        /// Same recency window for ingest and embed. Mutually exclusive with --since,
+        /// --ingest-recency, --embed-recency.
+        #[arg(long)]
+        recency: Option<u64>,
+        /// Same cutoff date for ingest and embed. Mutually exclusive with --recency,
+        /// --ingest-recency, --embed-recency.
+        #[arg(long)]
+        since: Option<String>,
+        /// Wider ingest-only window (FTS stays useful across history). Mutually exclusive
+        /// with --recency and --since. If set without --embed-recency, embed defaults
+        /// to the same window.
+        #[arg(long)]
+        ingest_recency: Option<u64>,
+        /// Narrower embed-only window (cost control). Mutually exclusive with --recency
+        /// and --since. If set without --ingest-recency, ingest is unfiltered (all).
+        #[arg(long)]
+        embed_recency: Option<u64>,
+        /// External embedder script. Required for the embed step unless an embedder is
+        /// already persisted in the vault via a prior `osl embed`.
+        #[arg(long)]
+        provider: Option<PathBuf>,
+        /// Re-embed ALL in-scope messages, even if an embedding already exists.
+        #[arg(long)]
+        force: bool,
+        /// Non-interactive mode (also implied when stdin is not a TTY).
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     /// Ingest session files into the vault.
     Ingest {
         /// File or directory to ingest.
@@ -176,6 +206,27 @@ pub fn run(cli: Cli) -> Result<()> {
             let target = path.unwrap_or(vault);
             db::init(&target, force)?;
             println!("initialized vault at {}", target.display());
+        }
+        Cmd::Setup {
+            recency,
+            since,
+            ingest_recency,
+            embed_recency,
+            provider,
+            force,
+            yes,
+        } => {
+            let args = crate::setup::SetupArgs {
+                recency,
+                since,
+                ingest_recency,
+                embed_recency,
+                provider,
+                force_embed: force,
+                yes,
+                vault,
+            };
+            crate::setup::run(args)?;
         }
         Cmd::Ingest {
             path,
