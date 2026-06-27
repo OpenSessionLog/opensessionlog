@@ -1,0 +1,7 @@
+{"timestamp":"2026-06-01T09:15:22Z","type":"session_meta","payload":{"id":"codex-mcp","source":"cli","cwd":"/tmp","model_provider":"openai","cli_version":"0.141.0","git":{"sha":"abc123","branch":"main"}}}
+{"timestamp":"2026-06-01T09:15:23Z","type":"turn_context","payload":{"model":"o3"}}
+{"timestamp":"2026-06-01T09:15:24Z","type":"event_msg","payload":{"type":"user_message","message":"Use MCP tool"}}
+{"timestamp":"2026-06-01T09:15:25Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll use the MCP tool."}]}}
+{"timestamp":"2026-06-01T09:15:26Z","type":"event_msg","payload":{"type":"mcp_tool_call_begin","call_id":"mcp_1","server":"filesystem","tool":"read_file","arguments":"{\"path\":\"/etc/hosts\"}"}}
+{"timestamp":"2026-06-01T09:15:27Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","call_id":"mcp_1","result":"127.0.0.1 localhost"}}
+{"timestamp":"2026-06-01T09:15:28Z","type":"event_msg","payload":{"type":"token_count","input":40,"output":20,"cached_input":5}}
