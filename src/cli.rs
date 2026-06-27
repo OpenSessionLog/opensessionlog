@@ -8,8 +8,30 @@ use crate::embed;
 use crate::error::{OslError, Result};
 use crate::export;
 use crate::ingest;
+use crate::report;
 use crate::search;
 use crate::watch;
+
+#[derive(clap::ValueEnum, Clone, Debug, Copy, PartialEq)]
+#[clap(rename_all = "kebab-case")]
+pub enum ReportPeriodKindArg {
+    Daily,
+    Weekly,
+    Monthly,
+    #[clap(name = "last-30-days")]
+    Last30Days,
+}
+
+impl From<ReportPeriodKindArg> for crate::model::ReportPeriodKind {
+    fn from(a: ReportPeriodKindArg) -> Self {
+        match a {
+            ReportPeriodKindArg::Daily => Self::Daily,
+            ReportPeriodKindArg::Weekly => Self::Weekly,
+            ReportPeriodKindArg::Monthly => Self::Monthly,
+            ReportPeriodKindArg::Last30Days => Self::Last30Days,
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -98,6 +120,30 @@ pub enum Cmd {
         /// Scan once and exit (do not run as a daemon). Useful for tests/cron.
         #[arg(long)]
         once: bool,
+    },
+    /// Aggregate usage into a period report (markdown or JSON).
+    Report {
+        /// Named period.
+        #[arg(long, value_enum)]
+        period: Option<ReportPeriodKindArg>,
+        /// Start date (YYYY-MM-DD), inclusive. Use with --to.
+        #[arg(long)]
+        from: Option<String>,
+        /// End date (YYYY-MM-DD), inclusive. Use with --from.
+        #[arg(long)]
+        to: Option<String>,
+        /// Output format: markdown (default) or json.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        /// Persist the report to the reports table (re-aggregates open periods).
+        #[arg(long)]
+        save: bool,
+        /// Filter to a single project slug.
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter to a single source name.
+        #[arg(long)]
+        source: Option<String>,
     },
 }
 
@@ -212,6 +258,82 @@ pub fn run(cli: Cli) -> Result<()> {
                 watch::scan_once(&mut conn, &paths, interval, false)?;
             } else {
                 watch::watch(&mut conn, &paths, debounce, interval)?;
+            }
+        }
+        Cmd::Report {
+            period,
+            from,
+            to,
+            format,
+            save,
+            project,
+            source,
+        } => {
+            // ALL flag validation happens BEFORE any DB interaction.
+            match format.as_str() {
+                "markdown" | "md" | "json" => {}
+                other => {
+                    return Err(OslError::Usage(format!(
+                        "unsupported report format: {other}"
+                    )));
+                }
+            }
+
+            let has_period = period.is_some();
+            let has_from = from.is_some();
+            let has_to = to.is_some();
+            match (has_period, has_from, has_to) {
+                (true, false, false) => {}
+                (false, true, true) => {}
+                (true, _, _) => {
+                    return Err(OslError::Usage(
+                        "--period is mutually exclusive with --from/--to".into(),
+                    ));
+                }
+                (false, true, false) | (false, false, true) => {
+                    return Err(OslError::Usage(
+                        "--from and --to must be supplied together".into(),
+                    ));
+                }
+                (false, false, false) => {
+                    return Err(OslError::Usage(
+                        "specify --period <kind> or --from/--to".into(),
+                    ));
+                }
+            }
+
+            if let (Some(f), Some(t)) = (from.as_deref(), to.as_deref()) {
+                if f > t {
+                    return Err(OslError::Usage(format!(
+                        "--from ({f}) must not be after --to ({t})"
+                    )));
+                }
+            }
+
+            let mut conn = db::open(&vault)?;
+            let kind = period.map(crate::model::ReportPeriodKind::from);
+            let doc = report::run_report(
+                &mut conn,
+                kind,
+                from.as_deref(),
+                to.as_deref(),
+                project.as_deref(),
+                source.as_deref(),
+                save,
+            )?;
+
+            if doc.metrics.total_sessions == 0
+                && doc.metrics.message_count == 0
+                && doc.metrics.tool_call_count == 0
+            {
+                println!("no sessions found");
+                return Ok(());
+            }
+
+            match format.as_str() {
+                "markdown" | "md" => print!("{}", report::render_markdown(&doc)),
+                "json" => print!("{}", report::render_json(&doc)?),
+                _ => unreachable!(),
             }
         }
     }

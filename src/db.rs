@@ -71,6 +71,63 @@ pub fn open(path: &Path) -> Result<Connection> {
         conn.execute("ALTER TABLE sessions ADD COLUMN summary_embedding BLOB", [])?;
     }
 
+    // Phase 3 migration: create reports + usage_summary in pre-Phase-3 vaults.
+    let needs_reports: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports')",
+        [],
+        |r| r.get(0),
+    )?;
+    let needs_usage: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_summary')",
+        [],
+        |r| r.get(0),
+    )?;
+    if needs_reports && needs_usage {
+        // already migrated — fast path, do nothing
+    } else {
+        // Re-run the DDL fragments verbatim from schema.sql. These are CREATE ... IF NOT EXISTS,
+        // so re-running on a fresh Phase 3 vault is a no-op.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                data_json TEXT NOT NULL,
+                markdown TEXT,
+                previous_report_id INTEGER REFERENCES reports(id),
+                token_budget_used INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+             );
+             CREATE INDEX IF NOT EXISTS idx_reports_scope ON reports(scope);
+             CREATE INDEX IF NOT EXISTS idx_reports_period ON reports(period_start, period_end);
+             CREATE INDEX IF NOT EXISTS idx_reports_previous ON reports(previous_report_id);
+
+             CREATE TABLE IF NOT EXISTS usage_summary (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                source_id INTEGER NOT NULL REFERENCES sources(id),
+                project_id INTEGER REFERENCES projects(id),
+                session_count INTEGER NOT NULL DEFAULT 0,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER GENERATED ALWAYS AS (input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) STORED,
+                estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                UNIQUE(date, source_id, project_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_summary(date);
+             CREATE INDEX IF NOT EXISTS idx_usage_source ON usage_summary(source_id);
+             CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_summary(project_id);",
+        )?;
+    }
+
     Ok(conn)
 }
 
@@ -195,5 +252,39 @@ mod tests {
             )
             .unwrap();
         assert!(count >= 1);
+    }
+
+    #[test]
+    fn open_migrates_phase3_tables_to_old_vault() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("data.sqlite");
+        init(&path, true).unwrap();
+
+        let conn = open(&path).unwrap();
+        conn.execute("DROP TABLE IF EXISTS reports", []).unwrap();
+        conn.execute("DROP TABLE IF EXISTS usage_summary", [])
+            .unwrap();
+
+        open(&path).unwrap();
+        let conn = open(&path).unwrap();
+        let reports: i64 = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let usage: i64 = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_summary')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(reports != 0);
+        assert!(usage != 0);
+
+        // Idempotent: second open must not error.
+        open(&path).unwrap();
     }
 }
