@@ -43,15 +43,31 @@ fn detect_sqlite_kind(path: &Path) -> Result<&'static str> {
 /// For SQLite databases, pass the `.db` file path directly; the connector is chosen
 /// by schema detection.
 pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
+    ingest_filtered(conn, path, &crate::recency::RecencyFilter::none())
+}
+
+pub fn ingest_filtered(
+    conn: &mut Connection,
+    path: &Path,
+    filter: &crate::recency::RecencyFilter,
+) -> Result<IngestReport> {
     let refs: Vec<SessionRef> = if path.is_file() && is_db_file(path) {
         // SQLite database — detect Hermes vs OpenCode by schema, then discover.
         let kind = detect_sqlite_kind(path)?;
         let connector = for_source(kind)
             .ok_or_else(|| OslError::Connector(format!("no connector for '{kind}'")))?;
-        connector.discover(path)?
+        connector.discover_filtered(path, filter)?
     } else if path.is_file() {
         // Single session file — detect JSONL kind (Claude vs Codex).
-        match detect_jsonl_kind(path)? {
+        let kind = detect_jsonl_kind(path)?;
+        if !filter.keep_file(path) {
+            // Old file: skip it entirely. Return an empty report (this is a pre-filter
+            // miss, not an error).
+            return Ok(IngestReport {
+                sessions: Vec::new(),
+            });
+        }
+        match kind {
             Some("claude") => {
                 let native_id = peek_session_id(path)?;
                 vec![SessionRef {
@@ -89,8 +105,14 @@ pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
             .ok_or_else(|| OslError::Connector("no connector for 'claude'".to_string()))?;
         let codex_connector = for_source("codex")
             .ok_or_else(|| OslError::Connector("no connector for 'codex'".to_string()))?;
-        let mut refs = claude_connector.discover(path)?;
-        refs.extend(codex_connector.discover(path)?);
+        let mut refs = claude_connector.discover_filtered(path, filter)?;
+        refs.extend(codex_connector.discover_filtered(path, filter)?);
+        // Claude/Codex use the default discover_filtered (returns all refs); apply the
+        // mtime pre-filter here before parse().
+        let refs: Vec<SessionRef> = refs
+            .into_iter()
+            .filter(|r| filter.keep_file(&r.path))
+            .collect();
         refs
     };
 

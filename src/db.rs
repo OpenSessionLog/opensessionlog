@@ -160,6 +160,39 @@ pub fn init(path: &Path, force: bool) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+/// Build the message SELECT SQL + bind params for `embed::run_with_filter`.
+///
+/// WHERE construction:
+///   - `embedding IS NULL`   — added when `!force`
+///   - `DATE(created_at) >= ?`— added when `filter.is_active()`
+///
+/// PARAMETERS are returned in the order they appear in the SQL, so callers bind with
+/// `rusqlite::params_from_iter(params.iter())`.
+pub fn messages_for_embedding_query(
+    filter: &crate::recency::RecencyFilter,
+    force: bool,
+) -> (String, Vec<String>) {
+    let mut clauses: Vec<&'static str> = Vec::new();
+    let mut params: Vec<String> = Vec::new();
+    if !force {
+        clauses.push("embedding IS NULL");
+    }
+    if let Some(since) = filter.since_date() {
+        clauses.push("DATE(created_at) >= ?");
+        params.push(since.to_string());
+    }
+    let where_sql = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+    let sql = format!(
+        "SELECT uuid, session_id, role, content, thinking FROM messages{} ORDER BY id ASC",
+        where_sql
+    );
+    (sql, params)
+}
+
 /// Return the default vault path.
 /// If the `OSL_VAULT` environment variable is set, its value is used verbatim.
 /// Otherwise returns `~/.opensessionlog/data.sqlite`. Phase 1 supports macOS/Linux only.

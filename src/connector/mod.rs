@@ -20,6 +20,19 @@ pub use hermes::HermesConnector;
 pub trait Connector {
     fn name(&self) -> &'static str;
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>>;
+    /// Same as `discover`, but optionally restricted to sessions whose timestamp
+    /// passes `filter`. Connectors that can push the filter into their source query
+    /// (SQLite sources) override this to filter server-side; JSONL connectors use the
+    /// default impl (return all refs) and let callers apply the mtime pre-filter.
+    fn discover_filtered(
+        &self,
+        directory: &std::path::Path,
+        filter: &crate::recency::RecencyFilter,
+    ) -> Result<Vec<SessionRef>> {
+        // Default: ignore the filter (backward-compatible with `discover`).
+        let _ = filter;
+        self.discover(directory)
+    }
     fn session_id(&self, session_ref: &SessionRef) -> Uuid {
         crate::ids::session_id(self.name(), &session_ref.native_id)
     }

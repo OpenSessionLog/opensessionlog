@@ -62,6 +62,13 @@ pub enum Cmd {
     Ingest {
         /// File or directory to ingest.
         path: PathBuf,
+        /// Ingest sessions modified in the last N days (JSONL) or started within the
+        /// last N days (SQLite sources). Mutually exclusive with --since.
+        #[arg(long)]
+        recency: Option<u64>,
+        /// Ingest sessions on or after YYYY-MM-DD. Mutually exclusive with --recency.
+        #[arg(long)]
+        since: Option<String>,
     },
     /// Search messages with FTS5.
     Grep {
@@ -87,9 +94,18 @@ pub enum Cmd {
         /// Path to the embedder script (invoked once; NDJSON over stdin/stdout).
         #[arg(long)]
         provider: PathBuf,
-        /// Embed at most N messages with NULL embeddings (default: all).
+        /// Embed at most N messages (default: all matching the filter).
         #[arg(long)]
         limit: Option<u64>,
+        /// Embed messages from the last N days. Mutually exclusive with --since.
+        #[arg(long)]
+        recency: Option<u64>,
+        /// Embed messages on or after YYYY-MM-DD. Mutually exclusive with --recency.
+        #[arg(long)]
+        since: Option<String>,
+        /// Re-embed all messages in scope, even if an embedding already exists.
+        #[arg(long)]
+        force: bool,
     },
     /// Semantic KNN search over stored embeddings.
     Search {
@@ -161,9 +177,19 @@ pub fn run(cli: Cli) -> Result<()> {
             db::init(&target, force)?;
             println!("initialized vault at {}", target.display());
         }
-        Cmd::Ingest { path } => {
+        Cmd::Ingest {
+            path,
+            recency,
+            since,
+        } => {
+            // Validate BEFORE opening the vault (matches the Cmd::Report pattern).
+            let filter = crate::recency::RecencyFilter::from_flags(
+                recency,
+                since,
+                crate::recency::now_unix_seconds(),
+            )?;
             let mut conn = db::open(&vault)?;
-            let report = ingest::ingest(&mut conn, &path)?;
+            let report = ingest::ingest_filtered(&mut conn, &path, &filter)?;
             for session in report.sessions {
                 println!(
                     "ingested {} ({}) — {} messages, {} tool calls, {} tokens",
@@ -203,9 +229,20 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Embed { provider, limit } => {
+        Cmd::Embed {
+            provider,
+            limit,
+            recency,
+            since,
+            force,
+        } => {
+            let filter = crate::recency::RecencyFilter::from_flags(
+                recency,
+                since,
+                crate::recency::now_unix_seconds(),
+            )?;
             let mut conn = db::open(&vault)?;
-            let stats = embed::run(&mut conn, &provider, limit)?;
+            let stats = embed::run_with_filter(&mut conn, &provider, limit, &filter, force)?;
             println!(
                 "embedded {} messages across {} sessions summarized (model={}, dims={})",
                 stats.messages_embedded, stats.sessions_summarized, stats.model, stats.dimensions
