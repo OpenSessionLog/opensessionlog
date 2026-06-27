@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::thread;
 
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::json;
@@ -204,97 +205,123 @@ pub fn run_with_filter(
     drop(rows);
     drop(stmt);
 
-    // 2. Spawn the embedder and send the buffered inputs as NDJSON.
+    let by_id: HashMap<String, String> = inputs
+        .iter()
+        .map(|(id, session_id, _)| (id.clone(), session_id.clone()))
+        .collect();
+
+    // 2. Spawn the embedder.
     let mut child = spawn(provider)?;
     let stdin = child
         .stdin
         .take()
         .ok_or_else(|| OslError::Embed("failed to open embedder stdin".into()))?;
-    {
-        let mut writer = BufWriter::new(stdin);
-        for (id, _session_id, text) in &inputs {
-            let line = json!({"id": id, "text": text}).to_string();
-            writeln!(writer, "{line}").map_err(OslError::from)?;
+
+    // 3. Open a transaction for the entire embed operation.
+    let tx = conn.transaction()?;
+
+    // 4. Write stdin and read stdout concurrently.
+    let embed_result = thread::scope(|s| {
+        // Writer thread — writes all lines to stdin concurrently with reading
+        let handle = s.spawn(|| -> Result<()> {
+            let mut writer = BufWriter::new(stdin);
+            for (id, _session_id, text) in &inputs {
+                let line = json!({"id": id, "text": text}).to_string();
+                writeln!(writer, "{line}")?;
+            }
+            writer.flush()?;
+            drop(writer); // closes stdin → child sees EOF
+            Ok(())
+        });
+
+        // Main thread — reads stdout concurrently
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| OslError::Embed("failed to open embedder stdout".into()))?;
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
+
+        // Parse header (existing logic, unchanged):
+        let mut header_line: Option<String> = None;
+        for line in lines.by_ref() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            header_line = Some(line);
+            break;
         }
-        writer.flush().map_err(OslError::from)?;
-        // Close stdin so the child can finish and we avoid pipe deadlock.
-        drop(writer);
-    }
+        let header_line = header_line
+            .ok_or_else(|| OslError::Embed("embedder produced no header line".into()))?;
+        let (model, dimensions) = parse_header(&header_line)?;
 
-    // 3. Read the header and all result lines.
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| OslError::Embed("failed to open embedder stdout".into()))?;
-    let reader = BufReader::new(stdout);
-    let mut lines = reader.lines();
+        // Parse result lines (existing logic, unchanged except using the already-built by_id):
+        let mut messages_embedded: u64 = 0;
+        let mut accumulators: HashMap<String, (Vec<f64>, u64)> = HashMap::new();
+        let mut update_stmt = tx.prepare("UPDATE messages SET embedding = ?2 WHERE uuid = ?1")?;
 
-    let mut header_line: Option<String> = None;
-    for line in lines.by_ref() {
-        let line = line.map_err(OslError::from)?;
-        if line.trim().is_empty() {
-            continue;
+        for line in lines {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let (id, embedding) = parse_result(&line)?;
+            if embedding.len() != dimensions as usize {
+                return Err(OslError::Embed(format!(
+                    "dimension mismatch: message {id} has {} dims, expected {dimensions}",
+                    embedding.len()
+                )));
+            }
+            let session_id = by_id
+                .get(&id)
+                .ok_or_else(|| OslError::Embed(format!("embedder returned unknown id: {id}")))?
+                .clone();
+
+            let blob = encode_f32_le(&embedding);
+            update_stmt.execute(rusqlite::params![id, blob])?;
+            messages_embedded += 1;
+
+            let (sum, count) = accumulators
+                .entry(session_id)
+                .or_insert_with(|| (vec![0.0; dimensions as usize], 0));
+            for (i, &v) in embedding.iter().enumerate() {
+                sum[i] += f64::from(v);
+            }
+            *count += 1;
         }
-        header_line = Some(line);
-        break;
-    }
-    let header_line =
-        header_line.ok_or_else(|| OslError::Embed("embedder produced no header line".into()))?;
-    let (model, dimensions) = parse_header(&header_line)?;
+        drop(update_stmt);
 
-    let mut by_id: HashMap<String, String> = inputs
-        .iter()
-        .map(|(id, session_id, _)| (id.clone(), session_id.clone()))
-        .collect();
-
-    let mut messages_embedded: u64 = 0;
-    let mut accumulators: HashMap<String, (Vec<f64>, u64)> = HashMap::new();
-
-    let mut update_stmt = conn.prepare("UPDATE messages SET embedding = ?2 WHERE uuid = ?1")?;
-
-    for line in lines {
-        let line = line.map_err(OslError::from)?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let (id, embedding) = parse_result(&line)?;
-        if embedding.len() != dimensions as usize {
+        if messages_embedded != inputs.len() as u64 {
             return Err(OslError::Embed(format!(
-                "dimension mismatch: message {id} has {} dims, expected {dimensions}",
-                embedding.len()
+                "embedder returned {} results for {} inputs",
+                messages_embedded,
+                inputs.len()
             )));
         }
-        let session_id = by_id
-            .get(&id)
-            .ok_or_else(|| OslError::Embed(format!("embedder returned unknown id: {id}")))?;
 
-        let blob = encode_f32_le(&embedding);
-        update_stmt.execute(rusqlite::params![id, blob])?;
-        messages_embedded += 1;
+        // Join the writer thread and propagate any error
+        handle
+            .join()
+            .map_err(|_| OslError::Embed("writer thread panicked".into()))??;
 
-        let (sum, count) = accumulators
-            .entry(session_id.clone())
-            .or_insert_with(|| (vec![0.0; dimensions as usize], 0));
-        for (i, &v) in embedding.iter().enumerate() {
-            sum[i] += f64::from(v);
-        }
-        *count += 1;
-        by_id.remove(&id);
-    }
-    drop(update_stmt);
+        Ok((model, dimensions, messages_embedded, accumulators))
+    });
 
-    // 4. Wait for the child to exit successfully.
-    let status = child
+    // Always reap the child to prevent zombies, even on error paths.
+    let child_status = child
         .wait()
         .map_err(|e| OslError::Embed(format!("embedder wait failed: {e}")))?;
-    if !status.success() {
+
+    let (model, dimensions, messages_embedded, accumulators) = embed_result?;
+
+    if !child_status.success() {
         return Err(OslError::Embed(format!(
-            "embedder exited with status {status}"
+            "embedder exited with status {child_status}"
         )));
     }
 
     // 5. Persist config via upsert (critical for Phase-1 -> Phase-2 upgraded vaults).
-    let tx = conn.transaction()?;
     let upsert_sql = "INSERT INTO vault_config(key,value,description,updated_at)
                       VALUES (?1,?2,?3,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                       ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at";
