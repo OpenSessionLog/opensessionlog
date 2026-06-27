@@ -136,6 +136,26 @@ $ osl report --period weekly
 | 2026-06-21 | 5        | 150      | 40    | 400,000 |
 ```
 
+### Recency-filtered ingestion and embedding (Issue #13)
+
+`osl ingest` and `osl embed` accept independent `--recency <days>` and `--since <date>`
+flags so you can ingest a wide history but only pay for embeddings on recent work.
+
+| Flag | Applies to | Behavior |
+|------|-----------|----------|
+| `osl ingest --recency 365` | `ingest` | Ingest sessions whose JSONL file `mtime` (or SQLite `started_at`/`time_created`) falls in the last 365 days |
+| `osl ingest --since 2026-03-01` | `ingest` | Ingest sessions on or after `2026-03-01` |
+| `osl embed --recency 120` | `embed` | Embed messages from the last 120 days (vault `messages.created_at`) |
+| `osl embed --since 2026-06-01` | `embed` | Embed messages on or after `2026-06-01` |
+| `osl embed --force` | `embed` | Re-embed every matching message, even if an embedding already exists |
+
+Rules:
+- `--recency` and `--since` are mutually exclusive within a single subcommand.
+- `osl ingest --recency 365` then `osl embed --recency 120` is a first-class decoupled workflow: ingest a year of history, but only embed the most recent 120 days.
+- `osl embed` without `--force` is incremental: it only embeds messages with `embedding IS NULL`. Re-running `osl embed --recency 30` is safe and will fill in newly-ingested messages in that window.
+- `--since` accepts strict `YYYY-MM-DD` (UTC, inclusive lower bound).
+- With no flags, `osl ingest` ingests everything and `osl embed` embeds every NULL-embedding message — unchanged from before.
+
 ### Embedder providers
 
 The `--provider` script is invoked once per `osl embed` run. It receives NDJSON on stdin (one line per message with `id` and `text` fields) and writes NDJSON to stdout: a header line with `type`, `model`, and `dimensions`, followed by one result line per input with `id` and `embedding` (float array).

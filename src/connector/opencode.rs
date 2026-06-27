@@ -10,48 +10,51 @@ use crate::model::{Erratum, NormalizedMessage, NormalizedSession, NormalizedTool
 
 pub struct OpenCodeConnector;
 
+fn resolve_db_path(target: &Path) -> Result<PathBuf> {
+    if target.is_dir() {
+        let candidate = target.join("opencode.db");
+        if candidate.exists() {
+            Ok(candidate)
+        } else {
+            // Also check for .db files in the directory
+            let mut found: Option<PathBuf> = None;
+            if let Ok(entries) = std::fs::read_dir(target) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(ext) = path.extension() {
+                            if ext == "db" || ext == "sqlite" {
+                                found = Some(path);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            found.ok_or_else(|| {
+                OslError::Connector(format!(
+                    "no .db file found in directory {}",
+                    target.display()
+                ))
+            })
+        }
+    } else if target.is_file() {
+        Ok(target.to_path_buf())
+    } else {
+        Err(OslError::Connector(format!(
+            "path does not exist: {}",
+            target.display()
+        )))
+    }
+}
+
 impl Connector for OpenCodeConnector {
     fn name(&self) -> &'static str {
         "opencode"
     }
 
     fn discover(&self, target: &Path) -> Result<Vec<SessionRef>> {
-        let db_path = if target.is_dir() {
-            let candidate = target.join("opencode.db");
-            if candidate.exists() {
-                candidate
-            } else {
-                // Also check for .db files in the directory
-                let mut found: Option<PathBuf> = None;
-                if let Ok(entries) = std::fs::read_dir(target) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_file() {
-                            if let Some(ext) = path.extension() {
-                                if ext == "db" || ext == "sqlite" {
-                                    found = Some(path);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                found.ok_or_else(|| {
-                    OslError::Connector(format!(
-                        "no .db file found in directory {}",
-                        target.display()
-                    ))
-                })?
-            }
-        } else if target.is_file() {
-            target.to_path_buf()
-        } else {
-            return Err(OslError::Connector(format!(
-                "path does not exist: {}",
-                target.display()
-            )));
-        };
-
+        let db_path = resolve_db_path(target)?;
         let conn = Connection::open(&db_path)?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
         let mut stmt = conn.prepare("SELECT id FROM session ORDER BY time_created")?;
@@ -74,6 +77,41 @@ impl Connector for OpenCodeConnector {
             )));
         }
 
+        Ok(refs)
+    }
+
+    fn discover_filtered(
+        &self,
+        target: &std::path::Path,
+        filter: &crate::recency::RecencyFilter,
+    ) -> Result<Vec<SessionRef>> {
+        if !filter.is_active() {
+            return self.discover(target);
+        }
+        let db_path = resolve_db_path(target)?;
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        // OpenCode session.time_created is INTEGER Unix MILLISECONDS.
+        let mut stmt =
+            conn.prepare("SELECT id FROM session WHERE time_created >= ?1 ORDER BY time_created")?;
+        let cutoff_ms: i64 = filter.since_unix().unwrap() * 1000;
+        let refs = stmt
+            .query_map([cutoff_ms], |row| {
+                let native_id: String = row.get(0)?;
+                Ok(SessionRef {
+                    source: "opencode".to_string(),
+                    native_id,
+                    path: db_path.clone(),
+                    project_path: None,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if refs.is_empty() {
+            return Err(OslError::Connector(format!(
+                "no sessions found in {} matching the recency filter",
+                db_path.display()
+            )));
+        }
         Ok(refs)
     }
 
@@ -509,7 +547,11 @@ mod tests {
     /// Populated with minimal synthetic session data for testing.
     fn build_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
+        build_test_db_schema(&conn);
+        conn
+    }
 
+    fn build_test_db_schema(conn: &Connection) {
         conn.execute_batch(
             "
             CREATE TABLE session (
@@ -584,8 +626,6 @@ mod tests {
             ",
         )
         .unwrap();
-
-        conn
     }
 
     /// Insert a minimal session with 2 messages (user + assistant) and no tool calls.
@@ -779,6 +819,73 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn discover_filtered_recency_30_keeps_only_recent_sessions() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        build_test_db_schema(&conn);
+
+        let now = crate::recency::now_unix_seconds();
+        let old_ms = (now - 60 * 86400) * 1000;
+        let recent_ms = now * 1000;
+
+        conn.execute(
+            "INSERT INTO session (id, title, directory, time_created, time_updated,
+             tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+             cost, model, agent, version)
+             VALUES (?1, 'Old', '/tmp', ?2, ?3, 0, 0, 0, 0, 0, 0.0,
+             '{\"id\":\"x\"}', 'build', 'local')",
+            rusqlite::params!["old_session", old_ms, old_ms + 60000],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO session (id, title, directory, time_created, time_updated,
+             tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+             cost, model, agent, version)
+             VALUES (?1, 'Recent', '/tmp', ?2, ?3, 0, 0, 0, 0, 0, 0.0,
+             '{\"id\":\"x\"}', 'build', 'local')",
+            rusqlite::params!["recent_session", recent_ms, recent_ms + 60000],
+        )
+        .unwrap();
+
+        drop(conn);
+
+        let connector = OpenCodeConnector;
+        let filter = crate::recency::RecencyFilter::from_flags(Some(30), None, now).unwrap();
+        let refs = connector.discover_filtered(&db_path, &filter).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].native_id, "recent_session");
+    }
+
+    #[test]
+    fn discover_filtered_none_returns_all_sessions() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        build_test_db_schema(&conn);
+
+        let now_ms = 1780251900000i64;
+        for sid in ["session_a", "session_b"] {
+            conn.execute(
+                "INSERT INTO session (id, title, directory, time_created, time_updated,
+                 tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+                 cost, model, agent, version)
+                 VALUES (?1, 'Test', '/tmp', ?2, ?3, 0, 0, 0, 0, 0, 0.0,
+                 '{\"id\":\"x\"}', 'build', 'local')",
+                rusqlite::params![sid, now_ms, now_ms + 60000],
+            ).unwrap();
+        }
+        drop(conn);
+
+        let connector = OpenCodeConnector;
+        let refs = connector
+            .discover_filtered(&db_path, &crate::recency::RecencyFilter::none())
+            .unwrap();
+        assert_eq!(refs.len(), 2);
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub mod ids;
 pub mod ingest;
 pub mod model;
 pub mod project;
+pub mod recency;
 pub mod report;
 pub mod search;
 pub mod vec;

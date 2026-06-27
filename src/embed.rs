@@ -147,23 +147,41 @@ pub(crate) fn parse_result(line: &str) -> Result<(String, Vec<f32>)> {
 }
 
 /// Embed all NULL-embedding messages and update per-session summary embeddings.
+/// (Unchanged signature — delegates with no filter and no force.)
 pub fn run(
     conn: &mut Connection,
     provider: &Path,
     limit_messages: Option<u64>,
 ) -> Result<EmbedStats> {
+    run_with_filter(
+        conn,
+        provider,
+        limit_messages,
+        &crate::recency::RecencyFilter::none(),
+        false,
+    )
+}
+
+/// Embed messages in the vault, optionally narrowed by `filter` and forced via `force`.
+///
+/// - `filter` narrows which messages are candidates (applied to `messages.created_at`).
+/// - `force=false` (default): only messages with `embedding IS NULL`.
+/// - `force=true`: re-embed ALL messages matching the filter, regardless of existing
+///   embeddings.
+pub fn run_with_filter(
+    conn: &mut Connection,
+    provider: &Path,
+    limit_messages: Option<u64>,
+    filter: &crate::recency::RecencyFilter,
+    force: bool,
+) -> Result<EmbedStats> {
     crate::vec::init();
 
-    // 1. Buffer all NULL-embedding messages before any write; this closes the read cursor
-    //    before we UPDATE messages, avoiding SQLITE_LOCKED.
-    let mut stmt = conn.prepare(
-        "SELECT uuid, session_id, role, content, thinking
-         FROM messages
-         WHERE embedding IS NULL
-         ORDER BY id ASC",
-    )?;
+    // 1. SELECT (buffer all rows before any UPDATE — Phase 2 SQLITE_LOCKED lesson).
+    let (sql, params) = crate::db::messages_for_embedding_query(filter, force);
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
     let cap = limit_messages.map(|n| n as usize).unwrap_or(usize::MAX);
-    let mut rows = stmt.query([])?;
     let mut inputs: Vec<(String, String, String)> = Vec::new();
     while let Some(row) = rows.next()? {
         if inputs.len() >= cap {
