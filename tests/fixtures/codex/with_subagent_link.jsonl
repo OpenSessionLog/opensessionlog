@@ -1,0 +1,5 @@
+{"timestamp":"2026-06-01T09:15:22Z","type":"session_meta","payload":{"id":"codex-fork","source":"cli","cwd":"/tmp","model_provider":"openai","cli_version":"0.141.0","forked_from_id":"codex-parent","parent_thread_id":"codex-immediate-parent","git":{"sha":"abc123","branch":"main"}}}
+{"timestamp":"2026-06-01T09:15:23Z","type":"turn_context","payload":{"model":"o3"}}
+{"timestamp":"2026-06-01T09:15:24Z","type":"event_msg","payload":{"type":"user_message","message":"Fork task"}}
+{"timestamp":"2026-06-01T09:15:25Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Working on fork."}]}}
+{"timestamp":"2026-06-01T09:15:26Z","type":"event_msg","payload":{"type":"token_count","input":20,"output":10,"cached_input":0}}

@@ -1,0 +1,6 @@
+{"timestamp":"2026-06-01T09:15:22Z","type":"session_meta","payload":{"id":"codex-minimal","source":"cli","cwd":"/tmp","model_provider":"openai","cli_version":"0.141.0","originator":"codex-cli","git":{"sha":"abc123","branch":"main"}}}
+{"timestamp":"2026-06-01T09:15:23Z","type":"turn_context","payload":{"model":"o3","summary":"Minimal codex session"}}
+{"timestamp":"2026-06-01T09:15:24Z","type":"event_msg","payload":{"type":"user_message","message":"Hello Codex"}}
+{"timestamp":"2026-06-01T09:15:25Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello! How can I help?"}]}}
+{"timestamp":"2026-06-01T09:15:26Z","type":"event_msg","payload":{"type":"token_count","input":100,"output":80,"cached_input":50}}
+{"timestamp":"2026-06-01T09:15:27Z","type":"event_msg","payload":{"type":"token_count","input":150,"output":80,"cached_input":70}}

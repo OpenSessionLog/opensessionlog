@@ -1,0 +1,9 @@
+{"timestamp":"2026-06-01T09:15:22Z","type":"session_meta","payload":{"id":"codex-unknown","source":"cli","cwd":"/tmp","model_provider":"openai","cli_version":"0.141.0","git":{"sha":"abc123","branch":"main"}}}
+{"timestamp":"2026-06-01T09:15:23Z","type":"turn_context","payload":{"model":"o3"}}
+{"timestamp":"2026-06-01T09:15:24Z","type":"event_msg","payload":{"type":"turn_started"}}
+{"timestamp":"2026-06-01T09:15:25Z","type":"event_msg","payload":{"type":"user_message","message":"Hello"}}
+{"timestamp":"2026-06-01T09:15:26Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi"}]}}
+{"timestamp":"2026-06-01T09:15:27Z","type":"event_msg","payload":{"type":"turn_complete"}}
+{"timestamp":"2026-06-01T09:15:28Z","type":"ghost_snapshot","payload":{"files":[]}}
+{"timestamp":"2026-06-01T09:15:29Z","type":"future_unknown","payload":{"foo":"bar"}}
+{"timestamp":"2026-06-01T09:15:30Z","type":"event_msg","payload":{"type":"future_msg_subtype","foo":"bar"}}

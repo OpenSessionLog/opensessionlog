@@ -3,6 +3,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use uuid::Uuid;
 
+use crate::connector::codex::peek_codex_id;
 use crate::connector::for_source;
 use crate::error::{OslError, Result};
 use crate::model::{IngestReport, IngestReportSession, NormalizedSession, SessionRef};
@@ -35,12 +36,12 @@ fn detect_sqlite_kind(path: &Path) -> Result<&'static str> {
 ///
 /// Routing rules:
 /// - `.db` / `.sqlite` files     → Schema detection: Hermes (compression_locks table) or OpenCode
-/// - `.jsonl` files               → Claude Code connector (JSONL session file)
-/// - Directories                  → Claude Code connector (scans for .jsonl files)
-/// - Other files                  → Claude Code connector (single JSONL session)
+/// - `.jsonl` files               → Detected as Claude Code or Codex CLI rollout JSONL
+/// - Directories                  → Concatenate discoveries from Claude and Codex connectors
+/// - Other files                  → Unsupported
 ///
-/// Directories are always routed to the claude connector. For SQLite databases,
-/// pass the `.db` file path directly; the connector is chosen by schema detection.
+/// For SQLite databases, pass the `.db` file path directly; the connector is chosen
+/// by schema detection.
 pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
     let refs: Vec<SessionRef> = if path.is_file() && is_db_file(path) {
         // SQLite database — detect Hermes vs OpenCode by schema, then discover.
@@ -49,19 +50,48 @@ pub fn ingest(conn: &mut Connection, path: &Path) -> Result<IngestReport> {
             .ok_or_else(|| OslError::Connector(format!("no connector for '{kind}'")))?;
         connector.discover(path)?
     } else if path.is_file() {
-        // Single session file — currently always claude JSONL.
-        let native_id = peek_session_id(path)?;
-        vec![SessionRef {
-            source: "claude".to_string(),
-            native_id,
-            path: path.to_path_buf(),
-            project_path: path.parent().map(Path::to_path_buf),
-        }]
+        // Single session file — detect JSONL kind (Claude vs Codex).
+        match detect_jsonl_kind(path)? {
+            Some("claude") => {
+                let native_id = peek_session_id(path)?;
+                vec![SessionRef {
+                    source: "claude".to_string(),
+                    native_id,
+                    path: path.to_path_buf(),
+                    project_path: path.parent().map(Path::to_path_buf),
+                }]
+            }
+            Some("codex") => {
+                let native_id = peek_codex_id(path)?.ok_or_else(|| {
+                    OslError::Connector(format!(
+                        "could not read codex session id from {}",
+                        path.display()
+                    ))
+                })?;
+                vec![SessionRef {
+                    source: "codex".to_string(),
+                    native_id,
+                    path: path.to_path_buf(),
+                    project_path: path.parent().map(Path::to_path_buf),
+                }]
+            }
+            _ => {
+                return Err(OslError::Connector(format!(
+                    "unsupported file format: {}",
+                    path.display()
+                )));
+            }
+        }
     } else {
-        // Directory — use claude connector for discovery.
-        let connector = for_source("claude")
+        // Directory — discover both Claude and Codex rollout files and concatenate
+        // results so a mixed directory can be ingested in one pass.
+        let claude_connector = for_source("claude")
             .ok_or_else(|| OslError::Connector("no connector for 'claude'".to_string()))?;
-        connector.discover(path)?
+        let codex_connector = for_source("codex")
+            .ok_or_else(|| OslError::Connector("no connector for 'codex'".to_string()))?;
+        let mut refs = claude_connector.discover(path)?;
+        refs.extend(codex_connector.discover(path)?);
+        refs
     };
 
     let mut sessions = Vec::with_capacity(refs.len());
@@ -97,6 +127,48 @@ fn peek_session_id(path: &Path) -> Result<String> {
     }
     let event: FirstEvent = serde_json::from_str(&first_line)?;
     Ok(event.session_id)
+}
+
+/// Detect whether a single `.jsonl` file is a Claude Code session or a Codex
+/// CLI rollout file by inspecting the first line. Returns `Some("claude")` when
+/// the JSON has a top-level `sessionId` string, `Some("codex")` when the first
+/// line is a `session_meta` event, or `None` for unsupported JSONL.
+fn detect_jsonl_kind(path: &Path) -> Result<Option<&'static str>> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    if reader.read_line(&mut first_line)? == 0 {
+        return Ok(None);
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FirstEvent {
+        #[serde(rename = "sessionId", default)]
+        session_id: Option<String>,
+        #[serde(rename = "type", default)]
+        kind: Option<String>,
+        payload: Option<serde_json::Value>,
+    }
+
+    match serde_json::from_str::<FirstEvent>(&first_line) {
+        Ok(event) => {
+            if event.session_id.is_some() {
+                return Ok(Some("claude"));
+            }
+            if event.kind.as_deref() == Some("session_meta") {
+                if let Some(payload) = event.payload {
+                    if payload.get("id").and_then(|v| v.as_str()).is_some() {
+                        return Ok(Some("codex"));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        Err(_) => Ok(None),
+    }
 }
 
 /// Write (or rewrite) a single session transactionally.
