@@ -157,6 +157,19 @@ pub fn watch(
                     }
                 }
             }
+
+            // Discover new .db/.sqlite files that appeared since startup.
+            for dir in &jsonl_dirs {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if is_db_file(&path) && !sqlite_files.iter().any(|(p, _)| p == &path) {
+                            let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                            sqlite_files.push((path, mtime));
+                        }
+                    }
+                }
+            }
         }
 
         if should_flush(deadline, now) && !pending.is_empty() {

@@ -45,7 +45,7 @@ pub fn grep(
             let content: Option<String> = row.get(2)?;
             let rank: f64 = row.get(3)?;
             hits.push(GrepHit {
-                session_id: Uuid::parse_str(&session_id).unwrap(),
+                session_id: Uuid::parse_str(&session_id)?,
                 role,
                 content_snippet: content.unwrap_or_default().chars().take(200).collect(),
                 rank,
@@ -59,7 +59,7 @@ pub fn grep(
             let content: Option<String> = row.get(2)?;
             let rank: f64 = row.get(3)?;
             hits.push(GrepHit {
-                session_id: Uuid::parse_str(&session_id).unwrap(),
+                session_id: Uuid::parse_str(&session_id)?,
                 role,
                 content_snippet: content.unwrap_or_default().chars().take(200).collect(),
                 rank,
@@ -175,8 +175,8 @@ pub fn semantic(conn: &Connection, query: &str, limit: u32) -> Result<Vec<Semant
         let content: Option<String> = row.get(3)?;
         let distance: f64 = row.get(4)?;
         hits.push(SemanticHit {
-            session_id: Uuid::parse_str(&session_id).unwrap(),
-            message_uuid: Uuid::parse_str(&message_uuid).unwrap(),
+            session_id: Uuid::parse_str(&session_id)?,
+            message_uuid: Uuid::parse_str(&message_uuid)?,
             role,
             content_snippet: content.unwrap_or_default().chars().take(200).collect(),
             distance,
@@ -228,7 +228,7 @@ pub fn similar(conn: &Connection, session_id: &Uuid, limit: u32) -> Result<Vec<S
         let title: Option<String> = row.get(1)?;
         let distance: f64 = row.get(2)?;
         hits.push(SimilarSession {
-            session_id: Uuid::parse_str(&id).unwrap(),
+            session_id: Uuid::parse_str(&id)?,
             title,
             distance,
         });
