@@ -1,0 +1,5 @@
+{"type":"session.start","sessionId":"tr-tool","timestamp":1780251875000}
+{"type":"user.message","content":"Run a tool"}
+{"type":"assistant.message","content":"I will run a tool.","model":"gpt-4o"}
+{"type":"tool.execution_start","tool_call_id":"call_1","tool_name":"bash","timestamp":1780251876000}
+{"type":"tool.execution_complete","tool_call_id":"call_1","result":"done","timestamp":1780251877000}

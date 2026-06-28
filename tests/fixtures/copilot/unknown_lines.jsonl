@@ -1,0 +1,4 @@
+{"kind":0,"v":{"sessionId":"cs-unknown","creationDate":1780251875000,"requests":[{"message":{"text":"Hello"},"responseItems":[{"kind":"text","text":"Hi"}]}]}}
+this is not json
+{"kind":99,"k":["requests"],"v":[]}
+{"type":"foo"}

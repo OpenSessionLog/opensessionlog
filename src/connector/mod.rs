@@ -17,6 +17,9 @@ pub use opencode::OpenCodeConnector;
 pub mod hermes;
 pub use hermes::HermesConnector;
 
+pub mod copilot;
+pub use copilot::CopilotChatConnector;
+
 pub trait Connector {
     fn name(&self) -> &'static str;
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>>;
@@ -45,6 +48,7 @@ pub fn for_source(name: &str) -> Option<Box<dyn Connector>> {
         "codex" => Some(Box::new(CodexCliConnector)),
         "opencode" => Some(Box::new(OpenCodeConnector)),
         "hermes" => Some(Box::new(HermesConnector)),
+        "copilot" => Some(Box::new(CopilotChatConnector)),
         _ => None,
     }
 }

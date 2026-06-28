@@ -1,0 +1,3 @@
+{"type":"session.start","sessionId":"tr-detect","timestamp":1780251875000}
+{"type":"user.message","content":"Detect transcript"}
+{"type":"assistant.message","content":"Detected.","model":"gpt-4o"}

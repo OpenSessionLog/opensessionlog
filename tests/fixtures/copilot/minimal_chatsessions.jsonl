@@ -1,0 +1,1 @@
+{"kind":0,"v":{"sessionId":"cs-minimal","creationDate":1780251875000,"customTitle":"Minimal Copilot Chat","requests":[{"message":{"text":"Hello Copilot"},"model":"gpt-4o","responseItems":[{"kind":"text","text":"Hi there! How can I help?"}]}]}}

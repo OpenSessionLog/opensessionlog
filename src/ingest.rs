@@ -4,6 +4,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::connector::codex::peek_codex_id;
+use crate::connector::copilot::peek_copilot_id;
 use crate::connector::for_source;
 use crate::error::{OslError, Result};
 use crate::model::{IngestReport, IngestReportSession, NormalizedSession, SessionRef};
@@ -91,6 +92,20 @@ pub fn ingest_filtered(
                     project_path: path.parent().map(Path::to_path_buf),
                 }]
             }
+            Some("copilot") => {
+                let native_id = peek_copilot_id(path)?.ok_or_else(|| {
+                    OslError::Connector(format!(
+                        "could not read copilot session id from {}",
+                        path.display()
+                    ))
+                })?;
+                vec![SessionRef {
+                    source: "copilot".to_string(),
+                    native_id,
+                    path: path.to_path_buf(),
+                    project_path: path.parent().map(Path::to_path_buf),
+                }]
+            }
             _ => {
                 return Err(OslError::Connector(format!(
                     "unsupported file format: {}",
@@ -105,10 +120,13 @@ pub fn ingest_filtered(
             .ok_or_else(|| OslError::Connector("no connector for 'claude'".to_string()))?;
         let codex_connector = for_source("codex")
             .ok_or_else(|| OslError::Connector("no connector for 'codex'".to_string()))?;
+        let copilot_connector = for_source("copilot")
+            .ok_or_else(|| OslError::Connector("no connector for 'copilot'".to_string()))?;
         let mut refs = claude_connector.discover_filtered(path, filter)?;
         refs.extend(codex_connector.discover_filtered(path, filter)?);
-        // Claude/Codex use the default discover_filtered (returns all refs); apply the
-        // mtime pre-filter here before parse().
+        refs.extend(copilot_connector.discover_filtered(path, filter)?);
+        // JSONL connectors use the default discover_filtered (returns all refs); apply
+        // the mtime pre-filter here before parse().
         let refs: Vec<SessionRef> = refs
             .into_iter()
             .filter(|r| filter.keep_file(&r.path))
@@ -170,17 +188,45 @@ fn detect_jsonl_kind(path: &Path) -> Result<Option<&'static str>> {
     struct FirstEvent {
         #[serde(rename = "sessionId", default)]
         session_id: Option<String>,
+        // Bound to JSON key "type" via serde(rename) — DO NOT drop. Codex
+        // detection (type=="session_meta") and copilot transcripts detection
+        // (type=="session.start") both depend on this field.
         #[serde(rename = "type", default)]
-        kind: Option<String>,
+        kind_str: Option<String>,
+        // Integer `kind` used by Copilot chatSessions format.
+        #[serde(default)]
+        kind: Option<i64>,
+        // The `v` value object carried by chatSessions kind=0 lines.
+        #[serde(default)]
+        v: Option<serde_json::Value>,
+        #[serde(default)]
         payload: Option<serde_json::Value>,
     }
 
     match serde_json::from_str::<FirstEvent>(&first_line) {
         Ok(event) => {
+            // Copilot branches MUST run before the Claude `session_id.is_some()`
+            // check, because transcripts session.start lines carry a top-level
+            // sessionId that would otherwise be misrouted to Claude.
+
+            // 1) Copilot chatSessions: integer kind 0 with v.sessionId present.
+            if event.kind == Some(0) {
+                if let Some(v) = event.v {
+                    if v.get("sessionId").and_then(|x| x.as_str()).is_some() {
+                        return Ok(Some("copilot"));
+                    }
+                }
+            }
+            // 2) Copilot transcripts: session.start event.
+            if event.kind_str.as_deref() == Some("session.start") {
+                return Ok(Some("copilot"));
+            }
+            // 3) Claude Code: top-level sessionId.
             if event.session_id.is_some() {
                 return Ok(Some("claude"));
             }
-            if event.kind.as_deref() == Some("session_meta") {
+            // 4) Codex CLI: session_meta with payload.id.
+            if event.kind_str.as_deref() == Some("session_meta") {
                 if let Some(payload) = event.payload {
                     if payload.get("id").and_then(|v| v.as_str()).is_some() {
                         return Ok(Some("codex"));
