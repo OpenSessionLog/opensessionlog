@@ -15,8 +15,6 @@
 //! metadata. IDs are deterministic UUIDv5 derivations so re-ingest is idempotent.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -24,7 +22,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::connector::opencode::ms_to_iso;
-use crate::connector::Connector;
+use crate::connector::{probe, reader, walk, Connector};
 use crate::error::{OslError, Result};
 use crate::ids::{message_id, session_id, tool_call_id};
 use crate::model::{Erratum, NormalizedMessage, NormalizedSession, NormalizedToolCall, SessionRef};
@@ -37,90 +35,14 @@ impl Connector for CopilotChatConnector {
     }
 
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>> {
-        let mut refs = Vec::new();
-        discover_recursive(directory, directory, &mut refs)?;
-        Ok(refs)
+        walk::discover_jsonl(directory, directory, "copilot", &|p| {
+            probe::peek_copilot_id(p)
+        })
     }
 
     fn parse(&self, session_ref: &SessionRef) -> Result<NormalizedSession> {
         parse_file(session_ref)
     }
-}
-
-fn discover_recursive(root: &Path, current: &Path, out: &mut Vec<SessionRef>) -> Result<()> {
-    if let Ok(entries) = std::fs::read_dir(current) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                // Mirrors Claude/Codex: skip subagents directories if they ever appear.
-                if path.file_name().map(|n| n == "subagents").unwrap_or(false) {
-                    continue;
-                }
-                discover_recursive(root, &path, out)?;
-            } else if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                if let Some(native_id) = peek_copilot_id(&path)? {
-                    out.push(SessionRef {
-                        source: "copilot".to_string(),
-                        native_id,
-                        path,
-                        project_path: Some(root.to_path_buf()),
-                    });
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Classify a single non-empty JSONL line as a known Copilot format and extract
-/// the session ID.
-///
-/// * chatSessions: `kind == 0` with `v.sessionId` present.
-/// * transcripts: `type == "session.start"` with a `sessionId` (top-level or in `payload`).
-///
-/// This is the single source of truth for Copilot format detection — both
-/// `peek_copilot_id` and `detect_jsonl_kind` in ingest.rs call it.
-pub(crate) fn classify_copilot_line(line: &str) -> Option<String> {
-    let value: Value = serde_json::from_str(line).ok()?;
-
-    // chatSessions seed patch.
-    if value.get("kind").and_then(|v| v.as_i64()) == Some(0) {
-        if let Some(session_id) = value
-            .get("v")
-            .and_then(|v| v.get("sessionId"))
-            .and_then(|v| v.as_str())
-        {
-            return Some(session_id.to_string());
-        }
-    }
-
-    // transcripts session.start event.
-    if value.get("type").and_then(|v| v.as_str()) == Some("session.start") {
-        if let Some(session_id) = value.get("sessionId").and_then(|v| v.as_str()).or_else(|| {
-            value
-                .get("payload")
-                .and_then(|p| p.get("sessionId"))
-                .and_then(|v| v.as_str())
-        }) {
-            return Some(session_id.to_string());
-        }
-    }
-
-    None
-}
-
-/// Peek at the first non-empty line of a JSONL file and decide whether it is a
-/// Copilot Chat local-storage file.
-///
-/// Delegates to [`classify_copilot_line`] for the actual detection logic.
-pub(crate) fn peek_copilot_id(path: &Path) -> Result<Option<String>> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut first_line = String::new();
-    if reader.read_line(&mut first_line)? == 0 {
-        return Ok(None);
-    }
-    Ok(classify_copilot_line(&first_line))
 }
 
 // === shred helpers (mirrors codex.rs) ===
@@ -198,17 +120,11 @@ impl ChatState {
 }
 
 fn parse_file(session_ref: &SessionRef) -> Result<NormalizedSession> {
-    let file = File::open(&session_ref.path)?;
-    let reader = BufReader::new(file);
+    let lines = reader::read_all_lines(&session_ref.path)?;
     let mut events: Vec<(i64, Value)> = Vec::new();
     let mut errata: Vec<Erratum> = Vec::new();
 
-    for (source_seq, line) in reader.lines().enumerate() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let source_seq = (source_seq + 1) as i64;
+    for (source_seq, line) in lines {
         match serde_json::from_str::<Value>(&line) {
             Ok(value) => events.push((source_seq, value)),
             Err(e) => {

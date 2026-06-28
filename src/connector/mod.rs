@@ -20,6 +20,10 @@ pub use hermes::HermesConnector;
 pub mod copilot;
 pub use copilot::CopilotChatConnector;
 
+pub mod probe;
+pub mod reader;
+pub mod walk;
+
 pub trait Connector {
     fn name(&self) -> &'static str;
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>>;

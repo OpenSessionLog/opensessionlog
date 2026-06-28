@@ -3,9 +3,10 @@ use std::path::Path;
 use rusqlite::Connection;
 use uuid::Uuid;
 
+use crate::connector::claude::peek_session_id;
 use crate::connector::codex::peek_codex_id;
-use crate::connector::copilot::{classify_copilot_line, peek_copilot_id};
 use crate::connector::for_source;
+use crate::connector::probe;
 use crate::error::{OslError, Result};
 use crate::model::{IngestReport, IngestReportSession, NormalizedSession, SessionRef};
 use crate::project;
@@ -60,7 +61,7 @@ pub fn ingest_filtered(
         connector.discover_filtered(path, filter)?
     } else if path.is_file() {
         // Single session file — detect JSONL kind (Claude vs Codex).
-        let kind = detect_jsonl_kind(path)?;
+        let kind = probe::detect_jsonl_kind(path)?;
         if !filter.keep_file(path) {
             // Old file: skip it entirely. Return an empty report (this is a pre-filter
             // miss, not an error).
@@ -70,7 +71,12 @@ pub fn ingest_filtered(
         }
         match kind {
             Some("claude") => {
-                let native_id = peek_session_id(path)?;
+                let native_id = peek_session_id(path)?.ok_or_else(|| {
+                    OslError::Connector(format!(
+                        "could not read claude session id from {}",
+                        path.display()
+                    ))
+                })?;
                 vec![SessionRef {
                     source: "claude".to_string(),
                     native_id,
@@ -93,7 +99,7 @@ pub fn ingest_filtered(
                 }]
             }
             Some("copilot") => {
-                let native_id = peek_copilot_id(path)?.ok_or_else(|| {
+                let native_id = probe::peek_copilot_id(path)?.ok_or_else(|| {
                     OslError::Connector(format!(
                         "could not read copilot session id from {}",
                         path.display()
@@ -145,82 +151,6 @@ pub fn ingest_filtered(
     }
 
     Ok(IngestReport { sessions })
-}
-
-fn peek_session_id(path: &Path) -> Result<String> {
-    use std::fs::File;
-    use std::io::{BufRead, BufReader};
-
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut first_line = String::new();
-    if reader.read_line(&mut first_line)? == 0 {
-        return Err(OslError::Connector(format!(
-            "empty file: {}",
-            path.display()
-        )));
-    }
-    #[derive(serde::Deserialize)]
-    struct FirstEvent {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-    }
-    let event: FirstEvent = serde_json::from_str(&first_line)?;
-    Ok(event.session_id)
-}
-
-/// Detect whether a single `.jsonl` file is a Copilot Chat, Claude Code,
-/// or Codex CLI session by inspecting the first line. Returns `Some("copilot")`,
-/// `Some("claude")`, `Some("codex")`, or `None` for unsupported JSONL.
-///
-/// Copilot detection delegates to [`classify_copilot_line`] (the single source
-/// of truth), so the branching logic stays in sync with `peek_copilot_id`.
-fn detect_jsonl_kind(path: &Path) -> Result<Option<&'static str>> {
-    use std::fs::File;
-    use std::io::{BufRead, BufReader};
-
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut first_line = String::new();
-    if reader.read_line(&mut first_line)? == 0 {
-        return Ok(None);
-    }
-
-    // 1) Copilot — delegate to the shared classifier.
-    if classify_copilot_line(&first_line).is_some() {
-        return Ok(Some("copilot"));
-    }
-
-    #[derive(serde::Deserialize)]
-    struct FirstEvent {
-        #[serde(rename = "sessionId", default)]
-        session_id: Option<String>,
-        // Bound to JSON key "type" via serde(rename). Used by Codex detection
-        // (type == "session_meta").
-        #[serde(rename = "type", default)]
-        kind_str: Option<String>,
-        #[serde(default)]
-        payload: Option<serde_json::Value>,
-    }
-
-    match serde_json::from_str::<FirstEvent>(&first_line) {
-        Ok(event) => {
-            // 2) Claude Code: top-level sessionId.
-            if event.session_id.is_some() {
-                return Ok(Some("claude"));
-            }
-            // 3) Codex CLI: session_meta with payload.id.
-            if event.kind_str.as_deref() == Some("session_meta") {
-                if let Some(payload) = event.payload {
-                    if payload.get("id").and_then(|v| v.as_str()).is_some() {
-                        return Ok(Some("codex"));
-                    }
-                }
-            }
-            Ok(None)
-        }
-        Err(_) => Ok(None),
-    }
 }
 
 /// Write (or rewrite) a single session transactionally.

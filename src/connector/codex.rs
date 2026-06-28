@@ -1,13 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::connector::Connector;
+use crate::connector::{reader, walk, Connector};
 use crate::error::{OslError, Result};
 use crate::ids::{message_id, session_id, tool_call_id};
 use crate::model::{Erratum, NormalizedMessage, NormalizedSession, NormalizedToolCall, SessionRef};
@@ -27,39 +25,12 @@ impl Connector for CodexCliConnector {
     }
 
     fn discover(&self, directory: &Path) -> Result<Vec<SessionRef>> {
-        let mut refs = Vec::new();
-        discover_recursive(directory, directory, &mut refs)?;
-        Ok(refs)
+        walk::discover_jsonl(directory, directory, "codex", &|p| peek_codex_id(p))
     }
 
     fn parse(&self, session_ref: &SessionRef) -> Result<NormalizedSession> {
         parse_file(session_ref)
     }
-}
-
-fn discover_recursive(root: &Path, current: &Path, out: &mut Vec<SessionRef>) -> Result<()> {
-    if let Ok(entries) = std::fs::read_dir(current) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                // Phase 1: ignore subagents/ subdirectories (mirrors Claude).
-                if path.file_name().map(|n| n == "subagents").unwrap_or(false) {
-                    continue;
-                }
-                discover_recursive(root, &path, out)?;
-            } else if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                if let Some(native_id) = peek_codex_id(&path)? {
-                    out.push(SessionRef {
-                        source: "codex".to_string(),
-                        native_id,
-                        path,
-                        project_path: Some(root.to_path_buf()),
-                    });
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Peek at the first non-empty line of a JSONL file and, if it is a Codex
@@ -68,12 +39,10 @@ fn discover_recursive(root: &Path, current: &Path, out: &mut Vec<SessionRef>) ->
 /// This is `pub(crate)` so `src/ingest.rs` can use the same detection logic
 /// for single-file routing without duplicating the rollout-format heuristic.
 pub(crate) fn peek_codex_id(path: &Path) -> Result<Option<String>> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut first_line = String::new();
-    if reader.read_line(&mut first_line)? == 0 {
-        return Ok(None);
-    }
+    let first_line = match reader::read_first_line(path)? {
+        Some(l) => l,
+        None => return Ok(None),
+    };
     match serde_json::from_str::<CodexLine>(&first_line) {
         Ok(line) if line.kind == "session_meta" => {
             if let Some(id) = line.payload.get("id").and_then(|v| v.as_str()) {
@@ -139,17 +108,11 @@ fn token_count_value(payload: &Value, top_key: &str, nested: &[&str]) -> Option<
 }
 
 fn parse_file(session_ref: &SessionRef) -> Result<NormalizedSession> {
-    let file = File::open(&session_ref.path)?;
-    let reader = BufReader::new(file);
+    let lines = reader::read_all_lines(&session_ref.path)?;
     let mut events: Vec<(i64, CodexLine)> = Vec::new();
     let mut errata: Vec<Erratum> = Vec::new();
 
-    for (source_seq, line) in reader.lines().enumerate() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let source_seq = (source_seq + 1) as i64;
+    for (source_seq, line) in lines {
         match serde_json::from_str::<CodexLine>(&line) {
             Ok(event) => events.push((source_seq, event)),
             Err(e) => {
