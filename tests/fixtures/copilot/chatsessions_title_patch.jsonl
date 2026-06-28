@@ -1,0 +1,2 @@
+{"kind":0,"v":{"sessionId":"cs-title","creationDate":1780251875000,"requests":[{"message":{"text":"Hello"},"responseItems":[{"kind":"text","text":"Hi"}]}]}}
+{"kind":1,"k":["customTitle"],"v":"Patched Title"}

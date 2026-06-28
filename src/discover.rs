@@ -107,6 +107,30 @@ pub fn default_roots_for_home(home: &Path) -> Vec<(&'static str, Vec<PathBuf>)> 
         result.push(("hermes", hermes_roots));
     }
 
+    // Copilot Chat (VS Code): workspaceStorage/<hash>/GitHub.copilot-chat
+    // contains chatSessions/*.jsonl and transcripts/*.jsonl. On Linux the
+    // User dir is ~/.config/Code/User; VS Code Insiders uses 'Code - Insiders'.
+    // macOS/Windows roots are NOT added here by default (this runs on the
+    // user's host); only HOME-based Linux paths are probed, mirroring how
+    // other connectors stay platform-conservative. The connector itself
+    // walks recursively from whatever roots exist.
+    let copilot_roots: Vec<PathBuf> = [
+        home.join(".config")
+            .join("Code")
+            .join("User")
+            .join("workspaceStorage"),
+        home.join(".config")
+            .join("Code - Insiders")
+            .join("User")
+            .join("workspaceStorage"),
+    ]
+    .into_iter()
+    .filter(|p| p.exists())
+    .collect();
+    if !copilot_roots.is_empty() {
+        result.push(("copilot", copilot_roots));
+    }
+
     result
 }
 

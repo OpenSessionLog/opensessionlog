@@ -122,7 +122,7 @@ impl Connector for OpenCodeConnector {
     }
 }
 
-fn ms_to_iso(ms: i64) -> String {
+pub(crate) fn ms_to_iso(ms: i64) -> String {
     // OpenCode timestamps are Unix milliseconds since the epoch (post-epoch).
     debug_assert!(ms >= 0, "negative milliseconds are not supported");
     let secs = ms / 1000;

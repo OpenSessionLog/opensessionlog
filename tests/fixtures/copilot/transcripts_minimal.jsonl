@@ -1,0 +1,3 @@
+{"type":"session.start","sessionId":"tr-minimal","timestamp":1780251875000}
+{"type":"user.message","content":"Hello transcript","timestamp":1780251876000}
+{"type":"assistant.message","content":"Hi there!","model":"gpt-4o","timestamp":1780251877000}

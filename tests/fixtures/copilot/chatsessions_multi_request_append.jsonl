@@ -1,0 +1,2 @@
+{"kind":0,"v":{"sessionId":"cs-multi","creationDate":1780251875000,"requests":[{"message":{"text":"First"},"responseItems":[{"kind":"text","text":"Answer 1"}]}]}}
+{"kind":2,"k":["requests"],"v":[{"message":{"text":"Second"},"model":"gpt-4o","responseItems":[{"kind":"text","text":"Answer 2"}]}]}
