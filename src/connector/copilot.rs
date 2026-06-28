@@ -72,23 +72,16 @@ fn discover_recursive(root: &Path, current: &Path, out: &mut Vec<SessionRef>) ->
     Ok(())
 }
 
-/// Peek at the first non-empty line of a JSONL file and decide whether it is a
-/// Copilot Chat local-storage file.
+/// Classify a single non-empty JSONL line as a known Copilot format and extract
+/// the session ID.
 ///
-/// * chatSessions format: top-level integer `kind == 0` and `v.sessionId` is a string.
-/// * transcripts format: top-level `type == "session.start"` and a `sessionId` is
-///   present (top-level, or nested in `payload` for some variants).
-pub(crate) fn peek_copilot_id(path: &Path) -> Result<Option<String>> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut first_line = String::new();
-    if reader.read_line(&mut first_line)? == 0 {
-        return Ok(None);
-    }
-    let value: Value = match serde_json::from_str(&first_line) {
-        Ok(v) => v,
-        Err(_) => return Ok(None),
-    };
+/// * chatSessions: `kind == 0` with `v.sessionId` present.
+/// * transcripts: `type == "session.start"` with a `sessionId` (top-level or in `payload`).
+///
+/// This is the single source of truth for Copilot format detection — both
+/// `peek_copilot_id` and `detect_jsonl_kind` in ingest.rs call it.
+pub(crate) fn classify_copilot_line(line: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(line).ok()?;
 
     // chatSessions seed patch.
     if value.get("kind").and_then(|v| v.as_i64()) == Some(0) {
@@ -97,7 +90,7 @@ pub(crate) fn peek_copilot_id(path: &Path) -> Result<Option<String>> {
             .and_then(|v| v.get("sessionId"))
             .and_then(|v| v.as_str())
         {
-            return Ok(Some(session_id.to_string()));
+            return Some(session_id.to_string());
         }
     }
 
@@ -109,11 +102,25 @@ pub(crate) fn peek_copilot_id(path: &Path) -> Result<Option<String>> {
                 .and_then(|p| p.get("sessionId"))
                 .and_then(|v| v.as_str())
         }) {
-            return Ok(Some(session_id.to_string()));
+            return Some(session_id.to_string());
         }
     }
 
-    Ok(None)
+    None
+}
+
+/// Peek at the first non-empty line of a JSONL file and decide whether it is a
+/// Copilot Chat local-storage file.
+///
+/// Delegates to [`classify_copilot_line`] for the actual detection logic.
+pub(crate) fn peek_copilot_id(path: &Path) -> Result<Option<String>> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    if reader.read_line(&mut first_line)? == 0 {
+        return Ok(None);
+    }
+    Ok(classify_copilot_line(&first_line))
 }
 
 // === shred helpers (mirrors codex.rs) ===

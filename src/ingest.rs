@@ -4,7 +4,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::connector::codex::peek_codex_id;
-use crate::connector::copilot::peek_copilot_id;
+use crate::connector::copilot::{classify_copilot_line, peek_copilot_id};
 use crate::connector::for_source;
 use crate::error::{OslError, Result};
 use crate::model::{IngestReport, IngestReportSession, NormalizedSession, SessionRef};
@@ -169,10 +169,12 @@ fn peek_session_id(path: &Path) -> Result<String> {
     Ok(event.session_id)
 }
 
-/// Detect whether a single `.jsonl` file is a Claude Code session or a Codex
-/// CLI rollout file by inspecting the first line. Returns `Some("claude")` when
-/// the JSON has a top-level `sessionId` string, `Some("codex")` when the first
-/// line is a `session_meta` event, or `None` for unsupported JSONL.
+/// Detect whether a single `.jsonl` file is a Copilot Chat, Claude Code,
+/// or Codex CLI session by inspecting the first line. Returns `Some("copilot")`,
+/// `Some("claude")`, `Some("codex")`, or `None` for unsupported JSONL.
+///
+/// Copilot detection delegates to [`classify_copilot_line`] (the single source
+/// of truth), so the branching logic stays in sync with `peek_copilot_id`.
 fn detect_jsonl_kind(path: &Path) -> Result<Option<&'static str>> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
@@ -184,48 +186,30 @@ fn detect_jsonl_kind(path: &Path) -> Result<Option<&'static str>> {
         return Ok(None);
     }
 
+    // 1) Copilot — delegate to the shared classifier.
+    if classify_copilot_line(&first_line).is_some() {
+        return Ok(Some("copilot"));
+    }
+
     #[derive(serde::Deserialize)]
     struct FirstEvent {
         #[serde(rename = "sessionId", default)]
         session_id: Option<String>,
-        // Bound to JSON key "type" via serde(rename) — DO NOT drop. Codex
-        // detection (type=="session_meta") and copilot transcripts detection
-        // (type=="session.start") both depend on this field.
+        // Bound to JSON key "type" via serde(rename). Used by Codex detection
+        // (type == "session_meta").
         #[serde(rename = "type", default)]
         kind_str: Option<String>,
-        // Integer `kind` used by Copilot chatSessions format.
-        #[serde(default)]
-        kind: Option<i64>,
-        // The `v` value object carried by chatSessions kind=0 lines.
-        #[serde(default)]
-        v: Option<serde_json::Value>,
         #[serde(default)]
         payload: Option<serde_json::Value>,
     }
 
     match serde_json::from_str::<FirstEvent>(&first_line) {
         Ok(event) => {
-            // Copilot branches MUST run before the Claude `session_id.is_some()`
-            // check, because transcripts session.start lines carry a top-level
-            // sessionId that would otherwise be misrouted to Claude.
-
-            // 1) Copilot chatSessions: integer kind 0 with v.sessionId present.
-            if event.kind == Some(0) {
-                if let Some(v) = event.v {
-                    if v.get("sessionId").and_then(|x| x.as_str()).is_some() {
-                        return Ok(Some("copilot"));
-                    }
-                }
-            }
-            // 2) Copilot transcripts: session.start event.
-            if event.kind_str.as_deref() == Some("session.start") {
-                return Ok(Some("copilot"));
-            }
-            // 3) Claude Code: top-level sessionId.
+            // 2) Claude Code: top-level sessionId.
             if event.session_id.is_some() {
                 return Ok(Some("claude"));
             }
-            // 4) Codex CLI: session_meta with payload.id.
+            // 3) Codex CLI: session_meta with payload.id.
             if event.kind_str.as_deref() == Some("session_meta") {
                 if let Some(payload) = event.payload {
                     if payload.get("id").and_then(|v| v.as_str()).is_some() {
