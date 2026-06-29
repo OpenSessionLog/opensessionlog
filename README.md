@@ -48,6 +48,11 @@ osl watch ~/.claude/projects/
 # One-shot scan (no daemon):
 osl watch --once ~/.claude/projects/
 
+# Install a persistent watch daemon (systemd / launchd / schtasks)
+osl autostart                          # auto-discovery, no paths baked in
+osl autostart /custom/path             # explicit paths baked into the service
+osl autostart --remove                 # remove config, print unload command
+
 # Generate a usage report for the last 30 days
 osl report --period last-30-days
 
@@ -74,6 +79,7 @@ Commands:
   search   Semantic KNN search over stored embeddings
   similar  Find sessions similar to a given session by summary embedding
   watch    Watch directories and auto-ingest changed session files
+  autostart Install or remove a persistent watch daemon (systemd / launchd / schtasks)
   export   Export a session transcript
   report   Aggregate usage into a period report (markdown or JSON)
   setup    Guided first-run: init, discover, ingest, and optionally embed
@@ -153,14 +159,20 @@ $ osl report --period weekly
 | `osl setup --recency 120` | Ingest and embed only sessions/messages from the last 120 days. |
 | `osl setup --ingest-recency 365 --embed-recency 120 --provider ./embedder.sh` | Ingest a year of history into FTS, but only embed the last 120 days. |
 | `osl setup --force --provider ./embedder.sh` | Re-embed all in-scope messages, even if an embedding already exists. |
+| `osl autostart` | Install a persistent watch daemon via systemd (Linux), launchd (macOS), or schtasks (Windows). Uses auto-discovery at runtime — no source paths baked in by default. |
+| `osl autostart /custom/path` | Bake explicit source paths into the service file. |
+| `osl autostart --remove` | Remove the autostart config and print the unload command. |
 
 `osl setup` discovers sessions from Claude Code (`~/.claude/projects/`), Codex CLI (`~/.codex/sessions/`), OpenCode (`~/.config/opencode/opencode.db`), and Hermes Agent (`~/.hermes/state.db` or XDG equivalents). Pi and GitHub Copilot are planned but not yet supported (Copilot sessions are currently handled inside the Codex connector).
+
+At the end of an interactive `osl setup` run, you'll be prompted to install a persistent watch daemon. This calls `osl autostart` to create a service file that watches all known source directories automatically.
 
 Flag rules:
 - `--recency` and `--since` apply the same window to both ingest and embed.
 - `--ingest-recency` and `--embed-recency` split the windows: if only `--ingest-recency` is set, embed uses the same window; if only `--embed-recency` is set, ingest defaults to **all** (no accidental data loss).
 - The four flag families are mutually exclusive: do not mix `--recency`/`--since` with `--ingest-recency`/`--embed-recency`.
 - When stdin is not a TTY, `osl setup` runs non-interactively (equivalent to `--yes`).
+- `osl autostart` is write-only — it writes the service file and prints the activation command, but does not execute it.
 
 ### Recency-filtered ingestion and embedding (Issue #13)
 
