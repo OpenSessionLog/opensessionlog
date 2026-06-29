@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
+use crate::autostart;
 use crate::db;
 use crate::embed;
 use crate::error::{OslError, Result};
@@ -155,7 +156,7 @@ pub enum Cmd {
     },
     /// Watch directories and auto-ingest changed session files.
     Watch {
-        /// Directories/files to watch (default: ~/.claude/projects/).
+        /// Directories/files to watch (default: auto-discover known source roots).
         paths: Vec<PathBuf>,
         /// Debounce window in milliseconds before flushing an ingest batch.
         #[arg(long, default_value_t = 1500)]
@@ -166,6 +167,16 @@ pub enum Cmd {
         /// Scan once and exit (do not run as a daemon). Useful for tests/cron.
         #[arg(long)]
         once: bool,
+    },
+    /// Install or remove a persistent watch daemon (systemd / launchd / schtasks).
+    /// Generated config uses auto-discovery by default; pass explicit paths to bake them in.
+    /// Does NOT accept --interval; the service always uses the default 60s poll.
+    Autostart {
+        /// Optional explicit source paths to bake into the service (default: auto-discover).
+        paths: Vec<PathBuf>,
+        /// Remove the autostart config and print the unload command.
+        #[arg(long)]
+        remove: bool,
     },
     /// Aggregate usage into a period report (markdown or JSON).
     Report {
@@ -336,16 +347,19 @@ pub fn run(cli: Cli) -> Result<()> {
             interval,
             once,
         } => {
-            let mut paths = paths;
-            if paths.is_empty() {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-                paths.push(PathBuf::from(home).join(".claude/projects"));
-            }
+            let paths = watch::resolve_paths(&paths);
             let mut conn = db::open(&vault)?;
             if once {
                 watch::scan_once(&mut conn, &paths, interval, false)?;
             } else {
                 watch::watch(&mut conn, &paths, debounce, interval)?;
+            }
+        }
+        Cmd::Autostart { paths, remove } => {
+            if remove {
+                autostart::remove()?;
+            } else {
+                autostart::install(&paths, &vault)?;
             }
         }
         Cmd::Report {

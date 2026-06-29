@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use notify::{RecursiveMode, Watcher};
 
+use crate::discover;
 use crate::error::{OslError, Result};
 use crate::ingest;
 use crate::model::IngestReportSession;
@@ -59,6 +60,18 @@ fn flush_pending(conn: &mut Connection, pending: &mut HashSet<PathBuf>) -> Resul
 /// Returns true when the debounce deadline has been reached.
 pub(crate) fn should_flush(deadline: Option<Instant>, now: Instant) -> bool {
     deadline.is_some_and(|d| now >= d)
+}
+
+/// Resolve watch paths: pass through non-empty input, otherwise auto-discover
+/// well-known source roots via `discover::default_roots()`.
+pub fn resolve_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
+    if !paths.is_empty() {
+        return paths.to_vec();
+    }
+    discover::default_roots()
+        .into_iter()
+        .flat_map(|(_, roots)| roots)
+        .collect()
 }
 
 /// Scan the given paths once, ingest anything that matches the routing rules,
@@ -199,5 +212,34 @@ mod tests {
         assert!(should_flush(Some(now), now));
         assert!(should_flush(Some(now - Duration::from_millis(1)), now));
         assert!(!should_flush(Some(now + Duration::from_millis(100)), now));
+    }
+
+    #[test]
+    fn resolve_paths_passes_through_non_empty() {
+        let input = vec![PathBuf::from("/custom/path")];
+        let result = resolve_paths(&input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn resolve_paths_empty_returns_discover_results() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let projects = tmp.path().join(".claude").join("projects");
+        std::fs::create_dir_all(&projects).unwrap();
+
+        let original_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", tmp.path());
+        let result = resolve_paths(&[]);
+        if let Some(orig) = original_home {
+            std::env::set_var("HOME", orig);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert!(!result.is_empty(), "expected non-empty discover results");
+        assert!(
+            result.contains(&projects),
+            "expected {projects:?} in {result:?}"
+        );
     }
 }
