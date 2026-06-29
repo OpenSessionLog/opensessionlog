@@ -1,3 +1,4 @@
+pub mod autostart;
 pub mod cli;
 pub mod connector;
 pub mod db;

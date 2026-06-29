@@ -3,6 +3,7 @@
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
+use crate::autostart;
 use crate::db;
 use crate::embed;
 use crate::error::{OslError, Result};
@@ -251,7 +252,12 @@ fn run_with_home(args: SetupArgs, home: &std::path::Path) -> Result<()> {
         println!("  osl setup --provider /path/to/embedder.sh");
     }
 
-    // Step 7: final banner.
+    // Step 7: interactive autostart prompt.
+    if interactive && prompt_yes_no("Install a persistent watch daemon? [y/N] ", false)? {
+        autostart::install(&[], &args.vault)?;
+    }
+
+    // Step 8: final banner.
     println!("setup complete");
     Ok(())
 }
