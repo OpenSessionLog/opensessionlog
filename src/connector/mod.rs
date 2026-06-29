@@ -12,10 +12,11 @@ pub mod codex;
 pub use codex::CodexCliConnector;
 
 pub mod opencode;
-pub use opencode::OpenCodeConnector;
 
 pub mod hermes;
-pub use hermes::HermesConnector;
+
+pub mod sqlite;
+pub use sqlite::{SqliteConnector, SqliteSessionParser};
 
 pub mod copilot;
 pub use copilot::CopilotChatConnector;
@@ -50,8 +51,12 @@ pub fn for_source(name: &str) -> Option<Box<dyn Connector>> {
     match name {
         "claude" => Some(Box::new(ClaudeCodeConnector)),
         "codex" => Some(Box::new(CodexCliConnector)),
-        "opencode" => Some(Box::new(OpenCodeConnector)),
-        "hermes" => Some(Box::new(HermesConnector)),
+        "opencode" => Some(Box::new(SqliteConnector {
+            parser: opencode::OpenCodeSessionParser,
+        })),
+        "hermes" => Some(Box::new(SqliteConnector {
+            parser: hermes::HermesSessionParser,
+        })),
         "copilot" => Some(Box::new(CopilotChatConnector)),
         _ => None,
     }

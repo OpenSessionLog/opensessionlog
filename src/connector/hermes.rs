@@ -2,131 +2,96 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
-use crate::connector::Connector;
+use crate::connector::SqliteSessionParser;
 use crate::error::{OslError, Result};
 use crate::ids::{message_id, session_id, tool_call_id};
 use crate::model::{Erratum, NormalizedMessage, NormalizedSession, NormalizedToolCall, SessionRef};
+use crate::recency::RecencyFilter;
 
-pub struct HermesConnector;
+pub struct HermesSessionParser;
 
-fn resolve_db_path(target: &Path) -> Result<PathBuf> {
-    if target.is_dir() {
-        let candidate = target.join("state.db");
-        if candidate.exists() {
-            Ok(candidate)
-        } else {
-            // Fall back: search for any .db file in the directory
-            let mut found: Option<PathBuf> = None;
-            if let Ok(entries) = std::fs::read_dir(target) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        if let Some(ext) = path.extension() {
-                            if ext == "db" || ext == "sqlite" {
-                                found = Some(path);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            found.ok_or_else(|| {
-                OslError::Connector(format!(
-                    "no state.db found in directory {}",
-                    target.display()
-                ))
-            })
-        }
-    } else if target.is_file() {
-        Ok(target.to_path_buf())
-    } else {
-        Err(OslError::Connector(format!(
-            "path does not exist: {}",
-            target.display()
-        )))
-    }
-}
-
-impl Connector for HermesConnector {
-    fn name(&self) -> &'static str {
+impl SqliteSessionParser for HermesSessionParser {
+    fn source_name(&self) -> &'static str {
         "hermes"
     }
 
-    fn discover(&self, target: &Path) -> Result<Vec<SessionRef>> {
-        let db_path = resolve_db_path(target)?;
-        let conn = Connection::open(&db_path)?;
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
-
-        let mut stmt =
-            conn.prepare("SELECT id, source FROM sessions WHERE archived = 0 ORDER BY started_at")?;
-        let refs = stmt
-            .query_map([], |row| {
-                let sid: String = row.get(0)?;
-                let source: String = row.get(1)?;
-                let native_id = format!("{}:{}", source, sid);
-                Ok(SessionRef {
-                    source: "hermes".to_string(),
-                    native_id,
-                    path: db_path.clone(),
-                    project_path: None,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        if refs.is_empty() {
-            return Err(OslError::Connector(format!(
-                "no sessions found in {}",
-                db_path.display()
-            )));
-        }
-
-        Ok(refs)
+    fn db_filename(&self) -> &'static str {
+        "state.db"
     }
 
-    fn discover_filtered(
+    fn discover_sessions(
         &self,
-        target: &std::path::Path,
-        filter: &crate::recency::RecencyFilter,
+        conn: &Connection,
+        db_path: &Path,
+        filter: Option<&RecencyFilter>,
     ) -> Result<Vec<SessionRef>> {
-        if !filter.is_active() {
-            return self.discover(target);
-        }
-        let db_path = resolve_db_path(target)?;
-        let conn = Connection::open(&db_path)?;
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
-        // Hermes sessions.started_at is REAL Unix seconds. Bind the cutoff as f64.
-        let mut stmt = conn.prepare(
-            "SELECT id, source FROM sessions
-             WHERE archived = 0 AND started_at >= ?1
-             ORDER BY started_at",
-        )?;
-        let cutoff: f64 = filter.since_unix().unwrap() as f64;
-        let refs = stmt
-            .query_map([cutoff], |row| {
-                let sid: String = row.get(0)?;
-                let source: String = row.get(1)?;
-                let native_id = format!("{}:{}", source, sid);
-                Ok(SessionRef {
-                    source: "hermes".to_string(),
-                    native_id,
-                    path: db_path.clone(),
-                    project_path: None,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let (refs, filtered) = match filter {
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, source FROM sessions WHERE archived = 0 ORDER BY started_at",
+                )?;
+                let refs: Vec<SessionRef> = stmt
+                    .query_map([], |row| {
+                        let sid: String = row.get(0)?;
+                        let source: String = row.get(1)?;
+                        let native_id = format!("{}:{}", source, sid);
+                        Ok(SessionRef {
+                            source: "hermes".to_string(),
+                            native_id,
+                            path: db_path.to_path_buf(),
+                            project_path: None,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                (refs, false)
+            }
+            Some(f) => {
+                // Hermes sessions.started_at is REAL Unix seconds.
+                let mut stmt = conn.prepare(
+                    "SELECT id, source FROM sessions
+                     WHERE archived = 0 AND started_at >= ?1
+                     ORDER BY started_at",
+                )?;
+                let cutoff: f64 = f.since_unix().unwrap() as f64;
+                let refs: Vec<SessionRef> = stmt
+                    .query_map([cutoff], |row| {
+                        let sid: String = row.get(0)?;
+                        let source: String = row.get(1)?;
+                        let native_id = format!("{}:{}", source, sid);
+                        Ok(SessionRef {
+                            source: "hermes".to_string(),
+                            native_id,
+                            path: db_path.to_path_buf(),
+                            project_path: None,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                (refs, true)
+            }
+        };
+
         if refs.is_empty() {
             return Err(OslError::Connector(format!(
-                "no sessions found in {} matching the recency filter",
-                db_path.display()
+                "no sessions found in {}{}",
+                db_path.display(),
+                if filtered {
+                    " matching the recency filter"
+                } else {
+                    ""
+                }
             )));
         }
+
         Ok(refs)
     }
 
-    fn parse(&self, session_ref: &SessionRef) -> Result<NormalizedSession> {
-        let conn = Connection::open(&session_ref.path)?;
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
-        parse_session(&conn, session_ref)
+    fn parse_session(
+        &self,
+        conn: &Connection,
+        session_ref: &SessionRef,
+    ) -> Result<NormalizedSession> {
+        // Delegate to the existing free function (unchanged).
+        parse_session(conn, session_ref)
     }
 }
 
@@ -560,6 +525,7 @@ fn parse_session(conn: &Connection, session_ref: &SessionRef) -> Result<Normaliz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connector::Connector;
     use std::path::PathBuf;
 
     fn build_test_db_schema(conn: &Connection) {
@@ -1085,7 +1051,9 @@ mod tests {
 
         drop(conn);
 
-        let connector = HermesConnector;
+        let connector = crate::connector::SqliteConnector {
+            parser: HermesSessionParser,
+        };
         let filter = crate::recency::RecencyFilter::from_flags(Some(30), None, now).unwrap();
         let refs = connector.discover_filtered(&db_path, &filter).unwrap();
         assert_eq!(refs.len(), 1);
@@ -1107,7 +1075,9 @@ mod tests {
         insert_session(&conn, "session_b", "telegram", "claude-sonnet-4-5");
         drop(conn);
 
-        let connector = HermesConnector;
+        let connector = crate::connector::SqliteConnector {
+            parser: HermesSessionParser,
+        };
         let refs = connector
             .discover_filtered(&db_path, &crate::recency::RecencyFilter::none())
             .unwrap();
